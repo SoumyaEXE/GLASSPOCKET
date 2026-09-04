@@ -18,8 +18,9 @@
  * COLLECTION_MINT. Record them carefully; they cannot be recreated.
  */
 
-import "dotenv/config";
 import fs from "node:fs";
+
+import { resolveFromRoot } from "./env.js";
 
 import { createUmi } from "@metaplex-foundation/umi-bundle-defaults";
 import {
@@ -54,7 +55,9 @@ export function loadUmi(): Umi {
   if (!keypairPath) throw new Error("SOLANA_KEYPAIR_PATH is not set");
 
   const umi = createUmi(rpc).use(mplBubblegum()).use(mplTokenMetadata());
-  const secret = new Uint8Array(JSON.parse(fs.readFileSync(keypairPath, "utf8")));
+  const secret = new Uint8Array(
+    JSON.parse(fs.readFileSync(resolveFromRoot(keypairPath), "utf8")),
+  );
   const keypair = umi.eddsa.createKeypairFromSecretKey(secret);
   return umi.use(keypairIdentity(keypair));
 }

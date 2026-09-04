@@ -10,26 +10,69 @@ USE ROLE ACCOUNTADMIN;
 
 -- ---------------------------------------------------------------------
 -- TRAP 01 / UNRECOVERABLE
--- Differential privacy requires Enterprise Edition or higher. Edition is
--- chosen at signup and cannot be changed afterwards. If this assertion
--- fails, stop: create a second trial and select Enterprise. Do not
--- proceed on a Standard account, because the centrepiece of this build
--- is permanently unavailable there.
+--
+-- Enterprise Edition or higher is required. Edition is chosen at signup
+-- and cannot be changed afterwards, so if this fails the only remedy is
+-- a second trial with Enterprise selected.
+--
+-- CURRENT_EDITION() is an unknown function in some deployments, this
+-- account included, so the edition is established by behaviour instead.
+-- Ninety-day Time Travel and aggregation policies are both Enterprise
+-- gated: if the account accepts them, it is Enterprise or higher.
 -- ---------------------------------------------------------------------
-SELECT CURRENT_EDITION() AS edition;
-
 EXECUTE IMMEDIATE $$
 BEGIN
-  LET edition STRING := (SELECT CURRENT_EDITION());
-  IF (edition NOT IN ('ENTERPRISE', 'BUSINESS CRITICAL', 'VPS')) THEN
-    RAISE STATEMENT_ERROR;
-  END IF;
-  RETURN 'edition ok: ' || edition;
+  CREATE DATABASE IF NOT EXISTS GP_EDITION_PROBE;
+  -- Standard Edition caps retention at one day and rejects this outright.
+  ALTER DATABASE GP_EDITION_PROBE SET DATA_RETENTION_TIME_IN_DAYS = 90;
+  CREATE SCHEMA IF NOT EXISTS GP_EDITION_PROBE.S;
+  CREATE OR REPLACE AGGREGATION POLICY GP_EDITION_PROBE.S.PROBE
+    AS () RETURNS AGGREGATION_CONSTRAINT ->
+    AGGREGATION_CONSTRAINT(MIN_GROUP_SIZE => 50);
+
+  DROP DATABASE IF EXISTS GP_EDITION_PROBE;
+  RETURN 'edition ok: aggregation policies and 90 day retention accepted, '
+      || 'so this account is Enterprise Edition or higher';
 EXCEPTION
-  WHEN STATEMENT_ERROR THEN
-    RETURN 'FATAL: edition is ' || edition ||
-           '. Differential privacy requires Enterprise or higher. '
-           'Create a new trial and select Enterprise. See Trap 01.';
+  WHEN OTHER THEN
+    DROP DATABASE IF EXISTS GP_EDITION_PROBE;
+    RETURN 'FATAL: this account rejected an Enterprise-only feature. '
+        || 'Create a new trial and select Enterprise. See Trap 01. '
+        || SQLERRM;
+END;
+$$;
+
+-- ---------------------------------------------------------------------
+-- FEATURE PROBE
+--
+-- Two features this build wants are unavailable on a trial account in
+-- some regions, and it is far better to find out here than at hour
+-- eleven. See docs/platform_constraints.md for what was found on this
+-- account and which Section 10 fallback each one triggers.
+-- ---------------------------------------------------------------------
+EXECUTE IMMEDIATE $$
+DECLARE
+  has_dp     STRING DEFAULT 'no';
+  has_ai     STRING DEFAULT 'no';
+BEGIN
+  BEGIN
+    EXECUTE IMMEDIATE
+      'CREATE OR REPLACE PRIVACY BUDGET GP_DP_PROBE '
+      || 'TYPE = per_query_epsilon EPSILON = 0.1 REFRESH_PERIOD = 24';
+    EXECUTE IMMEDIATE 'DROP PRIVACY BUDGET IF EXISTS GP_DP_PROBE';
+    has_dp := 'yes';
+  EXCEPTION WHEN OTHER THEN has_dp := 'no';
+  END;
+
+  BEGIN
+    EXECUTE IMMEDIATE 'SELECT AI_EMBED(''snowflake-arctic-embed-m'', ''probe'')';
+    has_ai := 'yes';
+  EXCEPTION WHEN OTHER THEN has_ai := 'no';
+  END;
+
+  RETURN 'differential privacy DDL available: ' || has_dp
+      || ' | AI functions available: ' || has_ai
+      || ' | if either reads no, follow docs/platform_constraints.md';
 END;
 $$;
 

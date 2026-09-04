@@ -527,14 +527,27 @@ Q_BENEFICIARY_TRUE = Query(
     note="COUNTERFACTUAL ONLY. Privileged role. Never granted to GP_ANALYST.",
 )
 
-Q_PRIVACY_BUDGET = Query(
+Q_COHORT_FLOOR = Query(
     sql="""
-        SELECT budget_name, epsilon_consumed, epsilon_allocated,
-               epsilon_remaining, share_remaining
-        FROM SERVING.V_PRIVACY_BUDGET
-        WHERE budget_name = 'public_analyst'
+        SELECT min_group_size, mechanism, guarantee_label, guarantee_note
+        FROM SERVING.V_COHORT_FLOOR
+        LIMIT 1
     """,
-    local="__budget__",
+    local="""
+        SELECT 50 AS min_group_size,
+               'AGGREGATION_POLICY' AS mechanism,
+               'minimum cohort guarantee' AS guarantee_label,
+               'Snowflake refuses any aggregate over fewer than fifty '
+               || 'beneficiaries. This is k-anonymity, not differential '
+               || 'privacy: it adds no noise and has no query budget.'
+                 AS guarantee_note
+    """,
+    note=(
+        "The differential privacy DDL does not parse on this deployment, so "
+        "Tab 05 ships against an aggregation policy with a minimum group "
+        "size. Section 10's documented fallback. See "
+        "docs/platform_constraints.md."
+    ),
 )
 
 Q_FILTER_OPTIONS = Query(

@@ -22,7 +22,7 @@
  *   Sunday's recording must touch nothing live. Section 09.
  */
 
-import "dotenv/config";
+import "./env.js";
 
 import { mintReceipt, type MintContext } from "./mint.js";
 import { SnowflakeBridge, type QueueRow } from "./snowflake.js";
