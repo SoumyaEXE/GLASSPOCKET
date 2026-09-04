@@ -72,7 +72,8 @@ SELECT 'PRV-01', 'privacy',
               INFORMATION_SCHEMA.POLICY_REFERENCES(
                 REF_ENTITY_NAME   => 'GLASSPOCKET.SERVING.V_BENEFICIARY_OUTCOMES',
                 REF_ENTITY_DOMAIN => 'VIEW'))
-             WHERE POLICY_KIND IN ('AGGREGATION_POLICY', 'PRIVACY_POLICY')) > 0,
+             WHERE POLICY_KIND IN ('AGGREGATION_POLICY', 'PRIVACY_POLICY')
+               AND POLICY_STATUS = 'ACTIVE') > 0,
            'PASS', 'FAIL')
 UNION ALL
 SELECT 'PRV-02', 'privacy',
@@ -81,8 +82,11 @@ SELECT 'PRV-02', 'privacy',
               INFORMATION_SCHEMA.POLICY_REFERENCES(
                 REF_ENTITY_NAME   => 'GLASSPOCKET.SERVING.V_BENEFICIARY_OUTCOMES',
                 REF_ENTITY_DOMAIN => 'VIEW'))
-             WHERE UPPER(COALESCE(REF_ARG_COLUMN_NAME, '')) = 'BENEFICIARY_ID') > 0,
-           'PASS', 'REVIEW')
+             -- The column is REF_ARG_COLUMN_NAMES, plural, and it holds a
+             -- JSON array such as [ "BENEFICIARY_ID" ].
+             WHERE UPPER(COALESCE(REF_ARG_COLUMN_NAMES::STRING, ''))
+                   LIKE '%BENEFICIARY_ID%') > 0,
+           'PASS', 'FAIL')
 UNION ALL
 SELECT 'PRV-03', 'privacy',
        'GP_ANALYST cannot read the unprotected counterfactual view',

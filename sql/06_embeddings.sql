@@ -64,8 +64,13 @@ COPY INTO RAW.ORG_VECTORS
   FILE_FORMAT = (FORMAT_NAME = RAW.FF_PREPARED)
   ON_ERROR = ABORT_STATEMENT;
 
+-- The staged column is a STRING holding a JSON array, so it has to be
+-- parsed before it can be cast. A bare ::ARRAY on a string does not parse
+-- JSON, it fails, which is worth stating because the error message
+-- ("not an array or vector, or has incorrect dimension") points at the
+-- dimension rather than at the parse.
 UPDATE STAGING.ORGS o
-   SET name_vec = v.vec::ARRAY::VECTOR(FLOAT, 768)
+   SET name_vec = PARSE_JSON(v.vec)::ARRAY::VECTOR(FLOAT, 768)
   FROM RAW.ORG_VECTORS v
  WHERE v.org_id = o.org_id
    AND o.name_vec IS NULL;

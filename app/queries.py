@@ -30,7 +30,7 @@ from dataclasses import dataclass
 
 DATABASE = "GLASSPOCKET"
 ANALYST_ROLE = "GP_ANALYST"
-SIMILARITY_THRESHOLD = 0.86
+SIMILARITY_THRESHOLD = 0.94
 EXPLORER_BASE = "https://explorer.solana.com"
 EXPLORER_CLUSTER = "devnet"
 
@@ -286,6 +286,28 @@ Q_THRESHOLD_CURVE = Query(
     """,
     local="SELECT * FROM threshold_curve ORDER BY threshold LIMIT 40",
     note="Precomputed sweep, so the slider responds with no query behind it.",
+)
+
+Q_THRESHOLD_CALIBRATION = Query(
+    sql="""
+        SELECT threshold, pairs_detected, true_pairs,
+               precision_at, recall_at, is_production_value
+        FROM MARTS.THRESHOLD_CALIBRATION
+        ORDER BY threshold
+        LIMIT 40
+    """,
+    local="""
+        SELECT threshold, pairs_detected,
+               pairs_ai_confirmed AS true_pairs,
+               NULL AS precision_at, NULL AS recall_at,
+               is_production_value
+        FROM threshold_curve ORDER BY threshold LIMIT 40
+    """,
+    note=(
+        "Precision and recall against ground truth, because every seeded "
+        "organisation records the real one it was built from. This is what "
+        "justifies the cut-off rather than asserting it."
+    ),
 )
 
 Q_NODE_DETAIL = Query(
