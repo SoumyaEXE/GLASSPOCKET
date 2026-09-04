@@ -36,6 +36,7 @@ import {
   generateSigner,
   keypairIdentity,
   percentAmount,
+  publicKey,
   type Umi,
 } from "@metaplex-foundation/umi";
 
@@ -66,8 +67,22 @@ export function loadUmi(): Umi {
 async function reportBalance(umi: Umi): Promise<number> {
   const balance = await umi.rpc.getBalance(umi.identity.publicKey);
   const sol = Number(balance.basisPoints) / 1e9;
-  console.log(`wallet   ${umi.identity.publicKey}`);
-  console.log(`balance  ${sol.toFixed(4)} SOL (devnet)`);
+
+  // Two different wallets, two different jobs, and confusing them costs
+  // an hour. The AUTHORITY signs every mint and pays for the tree, so it
+  // is the one that needs SOL. The TREASURY only receives the receipts;
+  // it never signs anything and its balance is irrelevant.
+  console.log("authority (signs and pays)");
+  console.log(`  ${umi.identity.publicKey}`);
+  console.log(`  ${sol.toFixed(4)} SOL (devnet)`);
+
+  const treasury = process.env.TREASURY_ADDRESS;
+  if (treasury && treasury !== umi.identity.publicKey.toString()) {
+    const t = await umi.rpc.getBalance(publicKey(treasury));
+    console.log("treasury (receives the receipts, never signs)");
+    console.log(`  ${treasury}`);
+    console.log(`  ${(Number(t.basisPoints) / 1e9).toFixed(4)} SOL (devnet)`);
+  }
   return sol;
 }
 
