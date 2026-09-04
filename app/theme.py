@@ -325,7 +325,8 @@ hr { border: none; border-top: 1px solid #E4E7EB; margin: 32px 0; }
 /* Progress bars carry budget state, so they are amber not the theme colour. */
 .gp-meter {
   height: 6px; background: #F7F8FA; border-radius: 999px;
-  border: 1px solid #E4E7EB; overflow: hidden; margin-top: 12px;
+  border: 1px solid #E4E7EB; overflow: hidden;
+  margin: 12px 0 28px 0; max-width: 520px;
 }
 .gp-meter-fill { height: 100%; background: #F5A623; }
 .gp-meter-fill-blue { background: #29B5E8; }

@@ -1,0 +1,51 @@
+# GLASSPOCKET / Build Spec Section 04B
+#
+# RULE: no secret is ever committed, printed to a log, pasted into a
+# Streamlit page, or visible in the demo recording. These entries exist
+# BEFORE the first commit, not after. If a key is ever exposed, rotate it
+# and note the rotation in the README rather than quietly rewriting history.
+
+# secrets
+.env
+.env.*
+!.env.example
+keys/
+*.p8
+*.pem
+*.key
+authority.json
+*keypair*.json
+
+# large source data, downloaded by the operator, never committed
+data/irs/
+data/geo/
+data/synthetic/
+data/*.duckdb
+data/*.parquet
+
+# The generated app/assets/geist.css is committed, and so are the four
+# woff2 faces plus the variable face it is built from: 264 KB total, and
+# it makes tools/build_font_css.py reproducible without reaching npm.
+fonts/*.ttf
+
+# node
+node_modules/
+npm-debug.log*
+dist/
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# os and editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# working scratch
+spec.txt

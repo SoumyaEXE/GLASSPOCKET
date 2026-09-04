@@ -1,0 +1,165 @@
+GLASSPOCKET / ARCHITECTURE
+==========================================================================
+
+  Nothing heavier than a single indexed SELECT executes during the demo.
+  Every embedding, similarity pair, geospatial join and blockchain asset
+  identifier is materialised into a table before demo time.
+
+
+DATA FLOW
+--------------------------------------------------------------------------
+
+  IRS Business Master File  ─┐
+  IRS Auto-Revocation List  ─┤
+  IATI Datastore slice      ─┼─>  RAW  ─>  STAGING  ─>  MARTS  ─>  SERVING
+  Census ZCTA centroids     ─┤              │            │           │
+  tools/make_synthetic.py   ─┘              │            │           │
+                                            │            │           │
+                                            │            │           └──> Streamlit
+                                            │            │                in Snowflake
+                                            │            │                (11 tabs)
+                                            │            │
+                    six Dynamic Tables ─────┘            │
+                    TARGET_LAG 60s                       │
+                                                         │
+             vectors, H3 geometry, risk UDF, ────────────┘
+             semantic view, graph layout
+
+
+  Trial accounts have NO external network access (error 509009), so the
+  chain integration polls inward rather than outward:
+
+                       ORACLE.MINT_QUEUE
+                              │
+                              │  claimBatch(50), atomic
+                              v
+                    Node bridge (Umi + Bubblegum V1)
+                              │  mintToCollectionV1
+                              │  confirm at "finalized"
+                              v
+                      Solana devnet, depth-14 tree
+                              │
+                              │  asset id, signature, leaf index
+                              v
+                       ORACLE.MINT_LOG
+                              │
+                              v
+                    SERVING.V_RECEIPT_GAP  ──> Tab 06
+
+  The signing key lives only in the bridge process. It never enters the
+  warehouse, the repository, or the recording.
+
+
+SCHEMAS
+--------------------------------------------------------------------------
+
+  RAW       As downloaded. Never edited. Everything lands as STRING and is
+            normalised on the way out, because the IRS regional files
+            disagree with each other about column names.
+
+  STAGING   One row per real-world entity. ORGS carries the VECTOR(768)
+            column, the H3 cells and the labelling contract columns.
+
+  MARTS     Derived intelligence. CLONE_PAIRS, CLONE_CONFIRMED,
+            DELIVERY_GEOMETRY, ORG_RISK, THRESHOLD_CURVE, ORG_PROJECTION,
+            GRAPH_NODES, GRAPH_EDGES, EVIDENCE_CITATIONS, and the six
+            Dynamic Tables.
+
+  SERVING   Terminal views only. The privacy policy attaches HERE and
+            nowhere else.
+
+  ORACLE    MINT_QUEUE, MINT_LOG, MINT_FAILURES. The bridge is the only
+            writer.
+
+
+WHY THE PRIVACY POLICY SITS AT THE END
+--------------------------------------------------------------------------
+
+  A privacy policy cannot coexist with an aggregation policy or a masking
+  policy on the same object.
+  A privacy-protected table blocks row-level SELECT entirely.
+  A Dynamic Table that depends on a privacy-protected object cannot
+  refresh.
+
+  Consequence: the policy attaches only to SERVING.V_BENEFICIARY_OUTCOMES,
+  a terminal view at the very end of the pipeline, with an entity key on
+  beneficiary_id. Nothing reads from it downstream.
+
+  MARTS.BENEFICIARY_FACTS   (Dynamic Table, unprotected)
+        │
+        ├─> SERVING.V_BENEFICIARY_OUTCOMES        privacy policy attached
+        │     granted to GP_ANALYST                entity key beneficiary_id
+        │                                          domains on amount_usd,
+        │                                          district
+        │
+        └─> SERVING.V_BENEFICIARY_OUTCOMES_TRUE   counterfactual only
+              NOT granted to GP_ANALYST            privileged role only
+
+  If GP_ANALYST could read the second view, Tab 05 would be theatre. The
+  grant is revoked explicitly in sql/12 and verified by check PRV-03.
+
+
+WHY THE SIMILARITY JOIN IS PRE-FILTERED
+--------------------------------------------------------------------------
+
+  Vector similarity at general availability performs an exact scan. A
+  self-join across an organisation table with no pre-filter is a full
+  cross product and will consume a trial credit budget in one query.
+
+  Every similarity query carries:
+
+      ON  s.region_h3 = t.region_h3      H3 resolution 3
+      AND s.cause     = t.cause
+      AND s.ein      <> t.ein
+      WHERE s.is_synthetic = TRUE        suspect side is ALWAYS seeded
+        AND t.is_verified  = TRUE        target side is ALWAYS real
+
+  The last two lines are not an optimisation. They are the mechanism that
+  makes it structurally impossible for a real organisation to appear on
+  the suspect side of a detected pair.
+
+
+APPLICATION
+--------------------------------------------------------------------------
+
+  glasspocket_app.py     page config, theme injection, tab router.
+                         One tab raising never takes the others down.
+
+  theme.py               Geist base64-inlined (CSP blocks external font
+                         hosts). Global override pulls every selector,
+                         including code/pre/kbd and the pydeck tooltip,
+                         onto Geist. No monospace anywhere.
+
+  charts.py              One styling gate. Every Plotly figure passes
+                         through style_fig so styling cannot drift.
+
+  components.py          hero, stat_band, identifier, chip,
+                         step_explainer, compare_columns, source_note.
+                         identifier() is the replacement for st.code,
+                         which forces monospace.
+
+  queries.py             EVERY SQL string, one file. Each entry carries
+                         the Snowflake statement and the preview-store
+                         equivalent.
+
+  data.py                Resolves the backend once. get_active_session()
+                         if a warehouse is attached, otherwise the local
+                         DuckDB preview store. The interface states which
+                         one is answering.
+
+  tabs/                  Eleven modules. Every one follows the universal
+                         tab contract: hero, stat band, primary visual,
+                         supporting pair, detail surface, explainer,
+                         provenance footer.
+
+
+THE TWO ANIMATIONS
+--------------------------------------------------------------------------
+
+  Exactly two, in the whole application.
+
+    1. Tab 01 reveal, ~400 ms, CSS keyframe.
+    2. Tab 05 noise curve, first render only, ~1.4 s marker sweep
+       right to left.
+
+  Anything else that moves is a defect.

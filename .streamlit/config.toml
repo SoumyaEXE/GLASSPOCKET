@@ -1,0 +1,23 @@
+# GLASSPOCKET / Build Spec Section 03, rendering mode.
+#
+# LIGHT MODE ONLY. The application renders in light mode exclusively.
+# White surfaces, ink text, colourful data. The theme is set explicitly so
+# a viewer with dark mode enabled in Snowsight still sees the intended
+# design. Charts carry the colour; the page does not. This is a deliberate
+# inversion of the usual data-application look and it is what makes the
+# screenshots stand out in a feed of dark dashboards.
+
+[theme]
+base = "light"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F7F8FA"
+textColor = "#16181D"
+primaryColor = "#29B5E8"
+font = "sans serif"
+
+[server]
+headless = true
+enableStaticServing = false
+
+[browser]
+gatherUsageStats = false
