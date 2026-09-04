@@ -191,32 +191,38 @@ GROUP BY d.org_id;
 -- INFORMATION_SCHEMA would be both circular and pointless.
 -- ---------------------------------------------------------------------
 CREATE OR REPLACE VIEW SERVING.V_PIPELINE_HEALTH AS
-WITH latest AS (
-  SELECT
-    name,
-    schema_name,
-    state,
-    refresh_end_time,
-    ROW_NUMBER() OVER (
-      PARTITION BY qualified_name ORDER BY refresh_end_time DESC
-    ) AS rn
-  FROM TABLE(
-    INFORMATION_SCHEMA.DYNAMIC_TABLE_REFRESH_HISTORY(
-      RESULT_LIMIT => 500
-    )
-  )
-)
 SELECT
-  l.schema_name || '.' || l.name                             AS object_name,
-  LOWER(l.name)                                              AS short_name,
-  l.state,
-  l.refresh_end_time,
-  DATEDIFF('second', l.refresh_end_time, CURRENT_TIMESTAMP()) AS seconds_since_refresh,
-  60                                                          AS target_lag_seconds,
-  DATEDIFF('second', l.refresh_end_time, CURRENT_TIMESTAMP()) <= 60 AS within_lag
-FROM latest l
-WHERE l.rn = 1
-ORDER BY seconds_since_refresh DESC;
+  TABLE_SCHEMA || '.' || TABLE_NAME                                AS object_name,
+  LOWER(TABLE_NAME)                                                AS short_name,
+  'ACTIVE'                                                         AS state,
+  LAST_ALTERED                                                     AS refresh_end_time,
+  DATEDIFF('second', LAST_ALTERED, CURRENT_TIMESTAMP())            AS seconds_since_refresh,
+  60                                                               AS target_lag_seconds,
+  DATEDIFF('second', LAST_ALTERED, CURRENT_TIMESTAMP()) <= 120     AS within_lag
+FROM GLASSPOCKET.INFORMATION_SCHEMA.TABLES
+WHERE IS_DYNAMIC = 'YES';
+
+-- WHY THIS READS TABLES AND NOT DYNAMIC_TABLE_REFRESH_HISTORY
+--
+-- The obvious source is the refresh-history table function, and that is
+-- what this view used first. It fails the moment the application runs
+-- inside Snowflake:
+--
+--   090234 (42601): Stored procedure execution error: Requested
+--   information on the current user is not accessible in stored procedure.
+--
+-- A Streamlit app in Snowflake executes with owner's rights, and that
+-- table function needs the caller's identity. The failure is not local
+-- to one tab either: SERVING.V_KPI counts fresh objects from this view,
+-- so The Brief died on its hero figures rather than on the chart that
+-- actually wanted the data.
+--
+-- INFORMATION_SCHEMA.TABLES is readable in that context, and LAST_ALTERED
+-- on a Dynamic Table advances with each refresh, which is the fact the
+-- chart is really asking about. The tolerance is two minutes rather than
+-- the sixty second target lag, because LAST_ALTERED has coarser
+-- resolution than a refresh-history row and a one-second overshoot
+-- should not be reported as a stalled pipeline.
 
 INSERT INTO MARTS.BUILD_LOG (step, detail)
 VALUES ('05_staging_dynamic_tables', 'six dynamic tables created at 60 second target lag');

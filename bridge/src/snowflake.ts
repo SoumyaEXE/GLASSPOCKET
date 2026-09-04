@@ -175,6 +175,38 @@ export class SnowflakeBridge {
     );
   }
 
+  /**
+   * Return stranded rows to the queue.
+   *
+   * A row is CLAIMED between being picked up and being minted. If the
+   * process dies in that window, or a mint failed for a reason that has
+   * since been fixed, the row sits in a state nothing will ever pick up
+   * again and the receipt is silently never written. Since a missing
+   * receipt is a finding on Tab 06, an accidental one is worse than
+   * useless: it is a false finding.
+   */
+  async requeueStranded(olderThanMinutes = 5): Promise<number> {
+    const rows = await this.execute<{ N: number }>(
+      `SELECT COUNT(*) AS N FROM ORACLE.MINT_QUEUE
+        WHERE status = 'FAILED'
+           OR (status = 'CLAIMED'
+               AND claimed_at < DATEADD('minute', -?, CURRENT_TIMESTAMP()))`,
+      [olderThanMinutes],
+    );
+    const n = Number(rows[0]?.N ?? 0);
+    if (n > 0) {
+      await this.execute(
+        `UPDATE ORACLE.MINT_QUEUE
+            SET status = 'PENDING', claimed_at = NULL
+          WHERE status = 'FAILED'
+             OR (status = 'CLAIMED'
+                 AND claimed_at < DATEADD('minute', -?, CURRENT_TIMESTAMP()))`,
+        [olderThanMinutes],
+      );
+    }
+    return n;
+  }
+
   async pendingCount(): Promise<number> {
     const rows = await this.execute<{ N: number }>(
       `SELECT COUNT(*) AS N FROM ORACLE.MINT_QUEUE WHERE status = 'PENDING'`,

@@ -327,15 +327,22 @@ section[data-testid="stSidebar"] > div {
   text-transform: uppercase; color: #9CA3AF;
   margin: 22px 0 10px 0;
 }
+/* The one-line description of the section being read. It is a caption,
+   not a control, so it must not wear a box that makes it look like a
+   text field sitting in the navigation. */
 .gp-rail-move {
-  font-size: 12px; color: #6B7280; line-height: 1.5;
-  padding: 10px 12px; margin-top: 12px;
-  background: #F7F8FA; border-radius: 6px; border: 1px solid #E4E7EB;
+  font-size: 12px; color: #9CA3AF; line-height: 1.5;
+  margin: 14px 2px 4px 2px; font-style: normal;
 }
+.gp-rail-state { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+.gp-rail-state .gp-chip { margin: 0; }
 .gp-rail-foot {
-  font-size: 11px; color: #9CA3AF; line-height: 1.6; margin-top: 22px;
+  font-size: 11px; color: #9CA3AF; line-height: 1.6; margin-top: 24px;
   padding-top: 16px; border-top: 1px solid #E4E7EB;
 }
+/* The rail scrolls independently, so its last line is not stranded
+   under the viewport edge. */
+section[data-testid="stSidebar"] > div { padding-bottom: 48px; }
 
 /* The rail is a stack of buttons, not a radio.
    Streamlit's radio renders through baseweb, whose internal structure
@@ -392,15 +399,43 @@ section[data-testid="stSidebar"] .stButton > button p {
 [data-testid="stToolbar"], [data-testid="stDecoration"],
 [data-testid="stStatusWidget"] { display: none !important; }
 
-/* The rail collapse control renders its icon as a Material Symbols
-   ligature. That font is not embedded, and under the Content Security
-   Policy it cannot be fetched, so the control renders the literal text
-   "keyboard_double_arrow_left" across the top of the page. The rail is
-   the navigation for this application and is meant to stay open, so the
-   control is removed rather than restyled. */
+/* =====================================================================
+   MATERIAL SYMBOLS LIGATURES
+   Streamlit draws its icons with the Material Symbols font and the icon
+   NAME as the element text, relying on the font's ligatures to turn
+   "keyboard_arrow_down" into a glyph. Inside Snowflake that font cannot
+   be fetched, because the Content Security Policy blocks external font
+   hosts (Trap 03, the same rule that forces Geist to be inlined here).
+   The ligature never resolves, so the raw name renders as words, and
+   every expander header reads "keyboard_double_arrow_right" on top of
+   its own label.
+
+   There is nothing to restyle: the glyph does not exist. So the icon
+   elements are removed and the controls are given affordances that do
+   not depend on a font arriving. */
+[data-testid="stIconMaterial"],
+.material-icons, .material-icons-outlined, .material-symbols-outlined,
+[data-testid="stExpanderToggleIcon"] { display: none !important; }
+
 [data-testid="stSidebarCollapseButton"],
 [data-testid="collapsedControl"],
 [data-testid="stSidebarCollapsedControl"] { display: none !important; }
+
+/* An expander needs to look openable without an icon font. A caret drawn
+   in CSS costs nothing and cannot fail to load. */
+[data-testid="stExpander"] summary,
+[data-testid="stExpander"] details > div:first-child {
+  position: relative; padding-right: 26px;
+}
+[data-testid="stExpander"] summary::after {
+  content: ""; position: absolute; right: 12px; top: 50%;
+  width: 7px; height: 7px; margin-top: -5px;
+  border-right: 1.5px solid #6B7280; border-bottom: 1.5px solid #6B7280;
+  transform: rotate(45deg); transition: transform 120ms ease;
+}
+[data-testid="stExpander"] details[open] summary::after {
+  transform: rotate(-135deg); margin-top: -2px;
+}
 
 /* --------------------------- streamlit chrome --------------------- */
 /* Native tabs are still used inside a section here and there, so they

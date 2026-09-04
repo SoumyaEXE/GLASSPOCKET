@@ -64,6 +64,11 @@ async function main(): Promise<void> {
   const snow = new SnowflakeBridge();
   await snow.connect();
 
+  const requeued = await snow.requeueStranded();
+  if (requeued > 0) {
+    console.log(`requeued ${requeued} stranded rows before starting`);
+  }
+
   const pending = await snow.pendingCount();
   console.log(`connected. ${pending} rows pending.`);
   console.log(`tree ${ctx.merkleTree}`);

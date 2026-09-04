@@ -122,11 +122,12 @@ def _sidebar() -> int:
         backend = "live warehouse" if not data.is_preview() else "local preview"
         tone = "verified" if not data.is_preview() else "seeded"
         st.markdown(
-            C.chip(backend, tone) + " " + C.chip("solana devnet", "chain"),
+            '<div class="gp-rail-state">'
+            + C.chip(backend, tone)
+            + C.chip("solana devnet", "chain")
+            + C.chip("seeded data is labelled", "seeded")
+            + "</div>",
             unsafe_allow_html=True,
-        )
-        st.markdown(
-            C.chip("seeded data is labelled", "seeded"), unsafe_allow_html=True
         )
 
         st.markdown(

@@ -906,7 +906,7 @@ Q_HONESTY_TOTALS = Query(
 
 Q_CORPUS_NOTE = Query(
     sql="""
-        SELECT COUNT(*) AS row_count_loaded, COUNT(*) AS row_count_available
+        SELECT COUNT(*) AS rows_loaded, COUNT(*) AS rows_available
         FROM STAGING.ORGS WHERE batch_id = 'IRS_BMF_2026'
     """,
     local="""

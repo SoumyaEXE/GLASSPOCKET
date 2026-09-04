@@ -37,6 +37,22 @@ from theme import (
 
 FONT = "Geist Variable, Geist, -apple-system, sans-serif"
 
+
+def as_bool(series):
+    """Coerce a column to a real boolean mask.
+
+    Snowflake returns BOOLEAN as a Python object column that can contain
+    None, and `~column` on that raises
+
+        TypeError: bad operand type for unary ~: 'NoneType'
+
+    which is how The Last Mile died in the warehouse while working
+    locally, where DuckDB hands back a numpy bool column. A missing
+    verdict is treated as not-flagged, because inventing a flag is worse
+    than missing one in a tool that exists to avoid false accusations.
+    """
+    return series.fillna(False).astype(bool)
+
 #: Verdict colours, fixed across every tab that renders a verdict.
 VERDICT_COLOURS = {
     "PLAUSIBLE": SNOWFLAKE_BLUE,
@@ -195,8 +211,9 @@ def semantic_neighbourhood(df, selected_pair: tuple[str, str] | None = None):
     """
     fig = go.Figure()
 
-    real = df[~df["is_synthetic"]]
-    fake = df[df["is_synthetic"]]
+    synthetic = as_bool(df["is_synthetic"])
+    real = df[~synthetic]
+    fake = df[synthetic]
 
     fig.add_scatter(
         x=real["pc1"], y=real["pc2"], mode="markers",
@@ -439,8 +456,9 @@ def transit_feasibility(df, max_kmh: float = 90.0) -> go.Figure:
     it needs no explanation: a truck cannot cover four hundred kilometres
     in under an hour.
     """
-    ok = df[~df["exceeds_plausible_speed"]]
-    bad = df[df["exceeds_plausible_speed"]]
+    exceeds = as_bool(df["exceeds_plausible_speed"])
+    ok = df[~exceeds]
+    bad = df[exceeds]
     max_km = float(df["km_from_base"].max() or 1)
 
     fig = go.Figure()
@@ -495,8 +513,9 @@ def cohort_floor_curve(df) -> go.Figure:
     released to the left of it, the exact value released to the right.
     """
     floor = float(df["floor"].iloc[0]) if len(df) else 50.0
-    answered = df[df["answered"]]
-    refused = df[~df["answered"]]
+    answered_mask = as_bool(df["answered"])
+    answered = df[answered_mask]
+    refused = df[~answered_mask]
 
     fig = go.Figure()
     fig.add_scatter(
@@ -556,7 +575,7 @@ def query_log(df, floor: float) -> go.Figure:
     against the floor that decided it.
     """
     colours = [FLAG_RED if refused else CONFIRMED_GREEN
-               for refused in df["refused"]]
+               for refused in as_bool(df["refused"])]
     fig = go.Figure()
     fig.add_bar(
         x=df["query_n"], y=df["cohort"],
@@ -719,7 +738,8 @@ def pipeline_freshness(df) -> go.Figure:
     extract.
     """
     colours = [
-        SNOWFLAKE_BLUE if within else NOISE_AMBER for within in df["within_lag"]
+        SNOWFLAKE_BLUE if within else NOISE_AMBER
+        for within in as_bool(df["within_lag"])
     ]
     fig = go.Figure()
     fig.add_bar(

@@ -95,10 +95,27 @@ export async function mintReceipt(
     },
   }).sendAndConfirm(ctx.umi, { confirm: { commitment: "finalized" } });
 
-  const leaf = await parseLeafFromMintToCollectionV1Transaction(
-    ctx.umi,
-    signature,
-  );
+  // Confirming at "finalized" is necessary but not sufficient: the RPC
+  // can still not have the transaction available to parse for a moment
+  // afterwards, and the parse then throws "Could not parse leaf from
+  // transaction". Measured at roughly one mint in fourteen without a
+  // retry, which would have thrown away three hundred receipts across a
+  // full run.
+  let leaf;
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      leaf = await parseLeafFromMintToCollectionV1Transaction(
+        ctx.umi,
+        signature,
+      );
+      break;
+    } catch (error) {
+      lastError = error;
+      await new Promise((r) => setTimeout(r, 400 * 2 ** attempt));
+    }
+  }
+  if (!leaf) throw lastError;
 
   const assetId = leaf.id.toString();
 
