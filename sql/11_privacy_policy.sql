@@ -133,7 +133,27 @@ GRANT SELECT ON VIEW GLASSPOCKET.SERVING.V_BENEFICIARY_OUTCOMES TO ROLE GP_ANALY
 -- column. GP_ANALYST is deliberately NOT granted on it: if the analyst
 -- persona could read this, Tab 05 would be theatre.
 -- ---------------------------------------------------------------------
-CREATE OR REPLACE VIEW GLASSPOCKET.SERVING.V_BENEFICIARY_OUTCOMES_TRUE AS
+-- The counterfactual lives in its own schema, not in SERVING.
+--
+-- Revoking SELECT was not enough. On this deployment GP_ANALYST could
+-- still read a SERVING view it held no grant on, and no future grant
+-- explained it. Rather than argue with the grant model, the object is
+-- moved somewhere the analyst role has no USAGE on at all: a role that
+-- cannot traverse the schema cannot reach anything inside it, whatever
+-- the object-level grants say.
+--
+-- This matters more than it looks. If GP_ANALYST can read the true
+-- values, then Tab 05's left-hand column is not a counterfactual, it is
+-- just a second query the analyst could have run, and the entire tab
+-- becomes theatre.
+CREATE SCHEMA IF NOT EXISTS GLASSPOCKET.PRIVILEGED
+  COMMENT = 'Unprotected counterfactual objects. GP_ANALYST has no USAGE here.';
+
+REVOKE USAGE ON SCHEMA GLASSPOCKET.PRIVILEGED FROM ROLE GP_ANALYST;
+
+DROP VIEW IF EXISTS GLASSPOCKET.SERVING.V_BENEFICIARY_OUTCOMES_TRUE;
+
+CREATE OR REPLACE VIEW GLASSPOCKET.PRIVILEGED.V_BENEFICIARY_OUTCOMES_TRUE AS
   SELECT
     beneficiary_id,
     district,
@@ -144,7 +164,7 @@ CREATE OR REPLACE VIEW GLASSPOCKET.SERVING.V_BENEFICIARY_OUTCOMES_TRUE AS
     month_key
   FROM GLASSPOCKET.MARTS.BENEFICIARY_FACTS;
 
-COMMENT ON VIEW GLASSPOCKET.SERVING.V_BENEFICIARY_OUTCOMES_TRUE IS
+COMMENT ON VIEW GLASSPOCKET.PRIVILEGED.V_BENEFICIARY_OUTCOMES_TRUE IS
   'COUNTERFACTUAL ONLY. The answer that would be released if no policy existed. Rendered on Tab 05 beside the protected answer and labelled as such. Never granted to GP_ANALYST.';
 
 -- ---------------------------------------------------------------------
@@ -186,6 +206,30 @@ USE ROLE GP_ANALYST;
 USE WAREHOUSE GP_WH;
 USE DATABASE GLASSPOCKET;
 
+-- ---------------------------------------------------------------------
+-- TRAP / SECONDARY ROLES
+--
+-- USE ROLE GP_ANALYST is not enough to test as GP_ANALYST.
+--
+-- Snowflake users default to DEFAULT_SECONDARY_ROLES = ('ALL'), so after
+-- switching primary role the session still carries every other role the
+-- user holds, ACCOUNTADMIN included, and object privilege checks are
+-- evaluated against that union. The effect is subtle and dangerous here:
+--
+--   CURRENT_ROLE() returns GP_ANALYST, so the aggregation policy sees
+--   the analyst and correctly applies the cohort floor,
+--
+--   but a SELECT on the unprotected counterfactual is allowed anyway,
+--   because ACCOUNTADMIN is still active as a secondary role.
+--
+-- So the policy looked like it worked while the thing it protects
+-- against was wide open. USE SECONDARY ROLES NONE is what makes the
+-- analyst persona actually behave like one.
+-- ---------------------------------------------------------------------
+USE SECONDARY ROLES NONE;
+
+
+
 -- 1. MUST FAIL. A refusal here is the guarantee working, so the deploy
 -- runner is told to expect it.
 -- EXPECT_FAIL
@@ -197,7 +241,11 @@ LIMIT 10;
 SELECT COUNT(*) AS n, SUM(amount_usd) AS total
 FROM GLASSPOCKET.SERVING.V_BENEFICIARY_OUTCOMES;
 
--- 3. MUST be refused, because the group falls below the floor.
+-- 3. MUST FAIL. The analyst has no route to the counterfactual at all.
+-- EXPECT_FAIL
+SELECT COUNT(*) FROM GLASSPOCKET.PRIVILEGED.V_BENEFICIARY_OUTCOMES_TRUE;
+
+-- 4. MUST be refused or withheld, because the group falls below the floor.
 SELECT COUNT(*) AS n, SUM(amount_usd) AS total
 FROM GLASSPOCKET.SERVING.V_BENEFICIARY_OUTCOMES
 WHERE district       = (SELECT MIN(district) FROM MARTS.DISTRICT_DIM)
@@ -205,6 +253,7 @@ WHERE district       = (SELECT MIN(district) FROM MARTS.DISTRICT_DIM)
   AND month_key      = '2026-08';
 
 USE ROLE ACCOUNTADMIN;
+USE SECONDARY ROLES ALL;
 
 INSERT INTO MARTS.BUILD_LOG (step, detail)
 VALUES ('11_privacy_policy',

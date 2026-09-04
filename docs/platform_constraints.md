@@ -113,3 +113,76 @@ The honest sentence is:
 > the warehouse. The embeddings were generated offline with the same model, and
 > the privacy layer is a minimum-cohort guarantee rather than a differential
 > privacy one. Both substitutions are labelled in the interface.
+
+
+---
+
+## Constraint 3: secondary roles silently defeat the analyst persona
+
+`USE ROLE GP_ANALYST` is **not** enough to test as GP_ANALYST.
+
+Snowflake users default to `DEFAULT_SECONDARY_ROLES = ('ALL')`, so after
+switching primary role the session still carries every other role the user
+holds, ACCOUNTADMIN included, and object privilege checks are evaluated against
+that union.
+
+The failure mode is nasty because it is half-invisible:
+
+* `CURRENT_ROLE()` returns `GP_ANALYST`, so the aggregation policy sees the
+  analyst and **correctly applies the cohort floor**. The protection looks like
+  it is working.
+* But a `SELECT` on the unprotected counterfactual is **allowed anyway**,
+  because ACCOUNTADMIN is still live as a secondary role.
+
+So the tab that exists to prove a guarantee would have been demonstrating it
+against a session that could have read the true values all along. The row-level
+refusal passing is what made this easy to miss.
+
+Two fixes, both applied:
+
+1. `USE SECONDARY ROLES NONE` wherever the analyst persona is assumed, in
+   `sql/11_privacy_policy.sql`, `tools/deploy.py` and `app/data.py`. This is the
+   fix that matters.
+2. The counterfactual view moved out of `SERVING` into a `PRIVILEGED` schema
+   that `GP_ANALYST` has no `USAGE` on, so a blanket
+   `GRANT SELECT ON ALL VIEWS IN SCHEMA SERVING` cannot reach it even by
+   accident.
+
+`tools/deploy.py --check` now verifies all four behaviours by attempting them
+rather than by reading a grant table:
+
+```
+=== policy verification, as GP_ANALYST ===
+  pass  row-level select is refused
+  pass  broad aggregate is answered
+  pass  counterfactual view is unreadable
+  pass  single-beneficiary group is withheld
+```
+
+---
+
+## Constraint 4: the specified threshold did not survive the model change
+
+The specification fixes the cosine cut-off at 0.86. That number belongs to the
+embedding pipeline it assumed. Vectors from the same model produced offline are
+not the same vectors, and a threshold is a property of the vectors.
+
+Re-measured against ground truth, which is knowable here because every seeded
+organisation records the real one it was built from in `synth_target_id`:
+
+| threshold | pairs | true | precision | recall |
+| --- | --- | --- | --- | --- |
+| 0.86 | 692 | 365 | 52.7% | 91.3% |
+| 0.90 | 389 | 336 | 86.4% | 84.0% |
+| **0.94** | **276** | **270** | **97.8%** | **67.5%** |
+| 0.97 | 169 | 166 | 98.2% | 41.5% |
+
+At 0.86 the detector offered *"Hispanic Leadership Trust"* against *"Vote Org"* —
+organisations that share a sector and nothing else. Shipping that would have
+made the Donor tab a liar on its opening screen.
+
+0.94 is where precision turns the corner and where the cut-off now sits. The
+cost is real and is stated rather than buried: recall falls to 270 of 387, so
+roughly a third of the seeded imitations are missed. The whole curve is
+materialised into `MARTS.THRESHOLD_CALIBRATION` and driven by the Tab 02
+slider, so the trade-off can be moved and watched instead of taken on trust.

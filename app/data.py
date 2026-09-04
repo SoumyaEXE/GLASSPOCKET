@@ -205,7 +205,7 @@ class PrivacyLedger:
 def true_answer(filters: dict) -> dict:
     """The counterfactual: the answer that would be released with no policy.
 
-    In warehouse mode this reads SERVING.V_BENEFICIARY_OUTCOMES_TRUE under a
+    In warehouse mode this reads PRIVILEGED.V_BENEFICIARY_OUTCOMES_TRUE under a
     privileged role. GP_ANALYST cannot read it, which is what stops Tab 05
     from being theatre.
     """
@@ -215,7 +215,7 @@ def true_answer(filters: dict) -> dict:
         sql = (
             "SELECT COUNT(*) AS cohort, SUM(amount_usd) AS total_usd, "
             "AVG(delivered_flag) AS delivery_rate "
-            "FROM SERVING.V_BENEFICIARY_OUTCOMES_TRUE " + where
+            "FROM PRIVILEGED.V_BENEFICIARY_OUTCOMES_TRUE " + where
         )
         df = session.sql(sql, params=params).to_pandas()
     else:
@@ -259,6 +259,10 @@ def released_answer(filters: dict, ledger: "PrivacyLedger",
         _, session = get_backend()
         try:
             session.sql(f"USE ROLE {Q.ANALYST_ROLE}").collect()
+            # Secondary roles default to ALL, which would keep
+            # ACCOUNTADMIN active and quietly exempt this query
+            # from the policy it is meant to be testing.
+            session.sql("USE SECONDARY ROLES NONE").collect()
             df = session.sql(
                 "SELECT COUNT(*) AS cohort, SUM(amount_usd) AS total_usd, "
                 "AVG(delivered_flag) AS delivery_rate "
@@ -299,6 +303,7 @@ def released_answer(filters: dict, ledger: "PrivacyLedger",
             }
         finally:
             session.sql("USE ROLE ACCOUNTADMIN").collect()
+            session.sql("USE SECONDARY ROLES ALL").collect()
 
     if below_floor:
         return {
@@ -379,7 +384,7 @@ def differencing_demo(filters: dict) -> dict | None:
             if mode() == WAREHOUSE:
                 _, session = get_backend()
                 df = session.sql(
-                    sql.format(obj="SERVING.V_BENEFICIARY_OUTCOMES_TRUE"),
+                    sql.format(obj="PRIVILEGED.V_BENEFICIARY_OUTCOMES_TRUE"),
                     params=params + [threshold],
                 ).to_pandas()
             else:

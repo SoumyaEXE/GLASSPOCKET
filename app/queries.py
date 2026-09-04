@@ -539,7 +539,7 @@ Q_BENEFICIARY_TRUE = Query(
     sql="""
         SELECT COUNT(*) AS cohort, SUM(amount_usd) AS total_usd,
                AVG(delivered_flag) AS delivery_rate
-        FROM SERVING.V_BENEFICIARY_OUTCOMES_TRUE
+        FROM PRIVILEGED.V_BENEFICIARY_OUTCOMES_TRUE
         WHERE (? IS NULL OR district       = ?)
           AND (? IS NULL OR programme_code = ?)
           AND (? IS NULL OR month_key      = ?)
@@ -816,6 +816,10 @@ Q_CONFIDENCE_RANK = Query(
         ORDER BY confidence DESC
         LIMIT 400
     """,
+    # Mirrors SERVING.V_CONFIDENCE_RANK exactly, including which table
+    # each column comes from: the activity figures live on the Dynamic
+    # Table, not on ORG_RISK, and the preview has to agree or the two
+    # backends would disagree about what confidence means.
     local="""
         SELECT o.org_id, o.ein, o.name, o.city, o.state, o.cause, o.blurb,
                COALESCE(a.delivery_rate, 0)    AS delivery_rate,
@@ -824,10 +828,11 @@ Q_CONFIDENCE_RANK = Query(
                COALESCE(a.disbursements, 0)    AS disbursements,
                ROUND(60 * COALESCE(a.delivery_rate, 0)
                    + 40 * COALESCE(r.receipt_coverage, 0)
-                   - COALESCE(a.risk_score, 0) * 0.5, 1) AS confidence
+                   - COALESCE(rk.risk_score, 0) * 0.5, 1) AS confidence
         FROM staging_orgs o
-        JOIN org_risk a USING (org_id)
+        JOIN org_activity a USING (org_id)
         LEFT JOIN receipt_coverage r USING (org_id)
+        LEFT JOIN org_risk rk USING (org_id)
         WHERE NOT o.is_synthetic
           AND o.is_verified
           AND o.batch_id = 'IRS_BMF_2026'
@@ -846,7 +851,7 @@ Q_CONFIDENCE_COUNT = Query(
     local="""
         SELECT COUNT(*) AS cleared
         FROM staging_orgs o
-        JOIN org_risk a USING (org_id)
+        JOIN org_activity a USING (org_id)
         WHERE NOT o.is_synthetic AND o.is_verified AND a.disbursements > 0
     """,
 )

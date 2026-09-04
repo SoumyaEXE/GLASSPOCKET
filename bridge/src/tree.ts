@@ -19,6 +19,7 @@
  */
 
 import fs from "node:fs";
+import { pathToFileURL } from "node:url";
 
 import { resolveFromRoot } from "./env.js";
 
@@ -121,7 +122,14 @@ async function main(): Promise<void> {
   );
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+// Windows paths do not survive a naive file:// comparison (drive letter,
+// backslashes), so the entry check goes through pathToFileURL. Without
+// this the script silently does nothing when run directly.
+const invokedDirectly =
+  process.argv[1] !== undefined &&
+  import.meta.url === pathToFileURL(process.argv[1]).href;
+
+if (invokedDirectly) {
   main().catch((error) => {
     console.error(error);
     process.exit(1);

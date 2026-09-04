@@ -512,9 +512,14 @@ def cohort_floor_curve(df) -> go.Figure:
         hovertemplate="cohort %{x}: %{y:,.0f} released<extra></extra>",
     )
     if len(refused):
+        # Plotted at the value that WOULD have been released, not at zero.
+        # At zero they vanish under an eight-million-dollar axis, and the
+        # point of the chart is that these answers exist and are withheld,
+        # not that they are small.
         fig.add_scatter(
-            x=refused["cohort"], y=[0] * len(refused), mode="markers",
-            marker=dict(size=7, color=FLAG_RED, symbol="x"),
+            x=refused["cohort"], y=refused["true_value"], mode="markers",
+            marker=dict(size=8, color=FLAG_RED, symbol="x",
+                        line=dict(width=1.5)),
             name="refused",
             hovertemplate="cohort %{x}: refused<extra></extra>",
         )
@@ -530,8 +535,10 @@ def cohort_floor_curve(df) -> go.Figure:
     )
     fig.update_xaxes(type="log", title=dict(
         text="cohort size", font=dict(family=FONT, size=12, color=TEXT_MUTED)))
-    fig.update_yaxes(title=dict(
-        text="value released", font=dict(family=FONT, size=12, color=TEXT_MUTED)))
+    # Both axes logarithmic, or the small cohorts, which are the entire
+    # subject of the chart, are crushed against the axis by the large ones.
+    fig.update_yaxes(type="log", title=dict(
+        text="value", font=dict(family=FONT, size=12, color=TEXT_MUTED)))
     return style_fig(fig, height=340, legend=True)
 
 

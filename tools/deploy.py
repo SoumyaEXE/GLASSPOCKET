@@ -224,13 +224,16 @@ def verify_policy(cur) -> None:
         ("broad aggregate is answered", True,
          "SELECT COUNT(*) c FROM SERVING.V_BENEFICIARY_OUTCOMES"),
         ("counterfactual view is unreadable", False,
-         "SELECT COUNT(*) FROM SERVING.V_BENEFICIARY_OUTCOMES_TRUE"),
+         "SELECT COUNT(*) FROM PRIVILEGED.V_BENEFICIARY_OUTCOMES_TRUE"),
     ]
     try:
         cur.execute("USE WAREHOUSE GP_WH")
         cur.execute("USE DATABASE GLASSPOCKET")
         cur.execute("USE SCHEMA SERVING")
         cur.execute("USE ROLE GP_ANALYST")
+        # Without this the session keeps ACCOUNTADMIN as a
+        # secondary role and the probe tests nothing.
+        cur.execute("USE SECONDARY ROLES NONE")
 
         for label, should_succeed, sql in checks:
             try:
@@ -257,6 +260,7 @@ def verify_policy(cur) -> None:
               "single-beneficiary group is withheld")
     finally:
         cur.execute("USE ROLE ACCOUNTADMIN")
+        cur.execute("USE SECONDARY ROLES ALL")
 
 
 def report(cur) -> None:

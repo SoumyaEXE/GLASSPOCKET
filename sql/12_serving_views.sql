@@ -260,20 +260,11 @@ FROM SERVING.V_PROVENANCE;
 GRANT SELECT ON ALL VIEWS   IN SCHEMA SERVING TO ROLE GP_ANALYST;
 GRANT SELECT ON ALL TABLES  IN SCHEMA MARTS   TO ROLE GP_ANALYST;
 
--- GP_ANALYST must never be able to read the unprotected twin. The
--- blanket grant above would otherwise hand it the counterfactual and
--- turn Tab 05 into theatre, so it is revoked immediately afterwards and
--- future grants are blocked from re-adding it.
-REVOKE SELECT ON VIEW SERVING.V_BENEFICIARY_OUTCOMES_TRUE FROM ROLE GP_ANALYST;
-
--- Belt and braces: a later GRANT ... ON ALL VIEWS would silently undo
--- the revoke above, so the same statement is repeated at the very end of
--- this file. If you add grants, add them BEFORE that line.
-REVOKE SELECT ON VIEW SERVING.V_BENEFICIARY_OUTCOMES_TRUE FROM ROLE GP_ANALYST;
-
--- The counterfactual is readable only by the privileged role, which is
--- the whole reason Tab 05's left-hand column can exist at all.
-SHOW GRANTS ON VIEW SERVING.V_BENEFICIARY_OUTCOMES_TRUE;
+-- The counterfactual is NOT in this schema. It lives in
+-- GLASSPOCKET.PRIVILEGED, which GP_ANALYST has no USAGE on, precisely so
+-- that a blanket GRANT ... ON ALL VIEWS IN SCHEMA SERVING like the one
+-- above can never reach it. See sql/11_privacy_policy.sql.
+REVOKE USAGE ON SCHEMA GLASSPOCKET.PRIVILEGED FROM ROLE GP_ANALYST;
 
 INSERT INTO MARTS.BUILD_LOG (step, detail)
 VALUES ('12_serving_views', 'serving views created and granted');
