@@ -523,20 +523,20 @@ def cohort_floor_curve(df) -> go.Figure:
             name="refused",
             hovertemplate="cohort %{x}: refused<extra></extra>",
         )
-    # Plotly positions shapes on a log axis in LOG UNITS. Passing the raw
-    # cohort numbers here draws the floor at 10^50 and stretches the axis
-    # to 10^48, which is how this chart first shipped.
-    import math
-
-    fig.add_vrect(
-        x0=0, x1=math.log10(floor),
-        fillcolor="rgba(229,72,77,0.07)", line_width=0, layer="below",
-    )
-    fig.add_vline(
-        x=math.log10(floor), line=dict(color=FLAG_RED, width=2),
-        annotation_text=f"floor {floor:.0f}",
-        annotation_position="top",
-        annotation_font=dict(family=FONT, size=12, color=FLAG_RED),
+    # The floor is drawn as a TRACE, not as a shape.
+    #
+    # Plotly places shapes on a logarithmic axis in log units, but does
+    # not apply that rule consistently between add_vline and add_vrect,
+    # so the line and the band landed in two different wrong places. A
+    # trace is always in data coordinates whatever the axis type, and it
+    # earns a legend entry, which is where the floor belongs anyway.
+    lo = float(min(df["true_value"].min(), 1))
+    hi = float(df["true_value"].max()) * 1.4
+    fig.add_scatter(
+        x=[floor, floor], y=[lo, hi], mode="lines",
+        line=dict(color=FLAG_RED, width=2),
+        name=f"floor: {floor:.0f} beneficiaries",
+        hovertemplate=f"below {floor:.0f} nothing is released<extra></extra>",
     )
     fig.update_xaxes(type="log", title=dict(
         text="cohort size", font=dict(family=FONT, size=12, color=TEXT_MUTED)))
@@ -563,19 +563,19 @@ def query_log(df, floor: float) -> go.Figure:
         marker=dict(color=colours, cornerradius=3),
         hovertemplate="query %{x}: cohort %{y:,}<extra></extra>",
     )
-    # Same rule on the y axis: log units for the line, raw for the data.
-    import math
-
-    fig.add_hline(
-        y=math.log10(max(floor, 1)), line=dict(color=INK, width=1.5, dash="dash"),
-        annotation_text=f"floor {floor:.0f}",
-        annotation_position="top left",
-        annotation_font=dict(family=FONT, size=12, color=INK),
+    # A trace again, for the same reason as the floor curve: data
+    # coordinates behave predictably on a log axis, shape coordinates do
+    # not.
+    fig.add_scatter(
+        x=list(df["query_n"]), y=[floor] * len(df), mode="lines",
+        line=dict(color=INK, width=1.5, dash="dash"),
+        name=f"floor: {floor:.0f}",
+        hoverinfo="skip",
     )
     fig.update_xaxes(title=dict(text="question", font=dict(
         family=FONT, size=12, color=TEXT_MUTED)), dtick=1)
     fig.update_yaxes(type="log")
-    return style_fig(fig, height=280)
+    return style_fig(fig, height=280, legend=True)
 
 
 # ---------------------------------------------------------------------------
