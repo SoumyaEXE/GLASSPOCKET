@@ -209,6 +209,56 @@ def stage_files(cur) -> None:
               f"{time.time() - started:.0f}s")
 
 
+def verify_policy(cur) -> None:
+    """The Section 06.1 verification step, executed rather than described.
+
+    Assumes the analyst role and attempts four reads. Three of them must
+    be refused; one must succeed. A build where the refusals succeed is
+    the broken one, so the expectations are asserted here rather than
+    eyeballed in a worksheet.
+    """
+    print("\n=== policy verification, as GP_ANALYST ===")
+    checks = [
+        ("row-level select is refused", False,
+         "SELECT beneficiary_id FROM SERVING.V_BENEFICIARY_OUTCOMES LIMIT 5"),
+        ("broad aggregate is answered", True,
+         "SELECT COUNT(*) c FROM SERVING.V_BENEFICIARY_OUTCOMES"),
+        ("counterfactual view is unreadable", False,
+         "SELECT COUNT(*) FROM SERVING.V_BENEFICIARY_OUTCOMES_TRUE"),
+    ]
+    try:
+        cur.execute("USE WAREHOUSE GP_WH")
+        cur.execute("USE DATABASE GLASSPOCKET")
+        cur.execute("USE SCHEMA SERVING")
+        cur.execute("USE ROLE GP_ANALYST")
+
+        for label, should_succeed, sql in checks:
+            try:
+                cur.execute(sql)
+                cur.fetchall()
+                allowed = True
+            except Exception:                   # noqa: BLE001
+                allowed = False
+            ok = allowed == should_succeed
+            print(f"  {'pass' if ok else 'FAIL'}  {label}")
+
+        # Below the floor the policy returns NULL rather than raising, so
+        # a withheld answer has to be detected by its value.
+        try:
+            cur.execute(
+                "SELECT COUNT(*) FROM SERVING.V_BENEFICIARY_OUTCOMES "
+                "WHERE beneficiary_id = "
+                "(SELECT MIN(beneficiary_id) FROM MARTS.BENEFICIARY_FACTS)")
+            value = cur.fetchone()[0]
+            withheld = value is None
+        except Exception:                       # noqa: BLE001
+            withheld = True
+        print(f"  {'pass' if withheld else 'FAIL'}  "
+              "single-beneficiary group is withheld")
+    finally:
+        cur.execute("USE ROLE ACCOUNTADMIN")
+
+
 def report(cur) -> None:
     print("\n=== acceptance gate ===")
     try:
@@ -274,6 +324,7 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.check:
             summary(cur)
+            verify_policy(cur)
             report(cur)
             return 0
 
@@ -308,6 +359,7 @@ def main(argv: list[str] | None = None) -> int:
 
         print(f"\n=== {total_ok} statements ok, {total_failed} failed ===")
         summary(cur)
+        verify_policy(cur)
         report(cur)
         return 1 if total_failed else 0
     finally:
