@@ -110,12 +110,24 @@ code, pre, kbd, samp, tt, .stMarkdown, .stDataFrame, .stTable,
 
 h1, h2, h3, h4 { letter-spacing: -0.028em; font-weight: 650; }
 
-#MainMenu, footer, header { visibility: hidden; }
+#MainMenu, footer { visibility: hidden; }
+/* The header stays, because it carries the control that collapses the
+   rail, but it is made transparent so it reads as empty space rather
+   than as chrome. Collapsing it to zero height leaves the collapse
+   button's icon ligature stranded on the page. */
+header[data-testid="stHeader"] {
+  background: transparent !important;
+  border: none !important;
+}
 
 .block-container {
   padding-top: 2.4rem;
-  padding-bottom: 4rem;
+  padding-bottom: 5rem;
+  /* Centred column beside the rail. Wide enough for a hex map and a pair
+     of side-by-side charts, narrow enough that body text stays readable. */
   max-width: 1180px;
+  margin-left: auto;
+  margin-right: auto;
 }
 
 /* Light mode only. A viewer with dark Snowsight still sees the intended
@@ -286,8 +298,113 @@ h1, h2, h3, h4 { letter-spacing: -0.028em; font-weight: 650; }
 .gp-compare-value-noise { color: #9A6410; }
 .gp-compare-sub { font-size: 13px; color: #6B7280; margin-top: 6px; }
 
+
+/* =====================================================================
+   THE LEFT RAIL
+   Carries the eleven moves in order, so the shape of the argument is
+   always visible and a viewer can see how far through it they are. A
+   horizontal tab strip cannot do that once it starts scrolling.
+   ===================================================================== */
+section[data-testid="stSidebar"] {
+  background: #FFFFFF;
+  border-right: 1px solid #E4E7EB;
+  width: 288px !important;
+}
+section[data-testid="stSidebar"] > div {
+  padding: 24px 18px 32px 18px;
+}
+
+.gp-rail-brand { margin-bottom: 28px; }
+.gp-rail-mark {
+  font-size: 17px; font-weight: 700; letter-spacing: -0.02em; color: #08090B;
+}
+.gp-rail-sub {
+  font-size: 11px; font-weight: 500; color: #6B7280;
+  margin-top: 4px; line-height: 1.5;
+}
+.gp-rail-eyebrow {
+  font-size: 10px; font-weight: 600; letter-spacing: 0.11em;
+  text-transform: uppercase; color: #9CA3AF;
+  margin: 22px 0 10px 0;
+}
+.gp-rail-move {
+  font-size: 12px; color: #6B7280; line-height: 1.5;
+  padding: 10px 12px; margin-top: 12px;
+  background: #F7F8FA; border-radius: 6px; border: 1px solid #E4E7EB;
+}
+.gp-rail-foot {
+  font-size: 11px; color: #9CA3AF; line-height: 1.6; margin-top: 22px;
+  padding-top: 16px; border-top: 1px solid #E4E7EB;
+}
+
+/* The rail is a stack of buttons, not a radio.
+   Streamlit's radio renders through baseweb, whose internal structure
+   differs between versions, so styling it depends on selectors that can
+   silently stop matching. That is a bad trade for the one control the
+   whole application is navigated with, and worse inside Snowflake where
+   the version is not ours to pick and a broken selector cannot be
+   iterated on. A button is a button in every version. */
+section[data-testid="stSidebar"] .stButton > button {
+  width: 100%;
+  text-align: left;
+  justify-content: flex-start;
+  padding: 8px 11px;
+  margin: 0 0 1px 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: #4B5563;
+  font-size: 13px;
+  font-weight: 500;
+  font-feature-settings: 'tnum' 1;
+  box-shadow: none;
+  min-height: 0;
+  line-height: 1.4;
+}
+section[data-testid="stSidebar"] .stButton > button:hover {
+  background: #F7F8FA; color: #16181D; border-color: transparent;
+}
+section[data-testid="stSidebar"] .stButton > button:focus {
+  box-shadow: none; outline: none;
+}
+/* The section being read. Snowflake Blue, because that is what active
+   means everywhere else in this interface. */
+section[data-testid="stSidebar"] .stButton > button[kind="primary"] {
+  background: #EAF7FD; border-color: #BEE5F6; color: #0E7FA8;
+  font-weight: 650;
+}
+section[data-testid="stSidebar"] .stButton > button[kind="primary"]:hover {
+  background: #DFF2FC; color: #0E7FA8;
+}
+section[data-testid="stSidebar"] [data-testid="stVerticalBlock"] { gap: 0; }
+/* Streamlit centres a button's label in an inner element, so aligning
+   the button alone leaves the text in the middle of the row. */
+section[data-testid="stSidebar"] .stButton > button > div,
+section[data-testid="stSidebar"] .stButton > button p {
+  text-align: left !important;
+  width: 100%;
+  justify-content: flex-start;
+}
+
+/* The deploy button and toolbar are local-development chrome. They do
+   not appear in Streamlit in Snowflake, and they should not appear in a
+   screenshot either. */
+[data-testid="stToolbar"], [data-testid="stDecoration"],
+[data-testid="stStatusWidget"] { display: none !important; }
+
+/* The rail collapse control renders its icon as a Material Symbols
+   ligature. That font is not embedded, and under the Content Security
+   Policy it cannot be fetched, so the control renders the literal text
+   "keyboard_double_arrow_left" across the top of the page. The rail is
+   the navigation for this application and is meant to stay open, so the
+   control is removed rather than restyled. */
+[data-testid="stSidebarCollapseButton"],
+[data-testid="collapsedControl"],
+[data-testid="stSidebarCollapsedControl"] { display: none !important; }
+
 /* --------------------------- streamlit chrome --------------------- */
-/* Native tabs, restyled. No default chrome is visible anywhere. */
+/* Native tabs are still used inside a section here and there, so they
+   keep their styling even though navigation moved to the rail. */
 .stTabs [data-baseweb="tab-list"] {
   gap: 2px; border-bottom: 1px solid #E4E7EB; overflow-x: auto;
 }

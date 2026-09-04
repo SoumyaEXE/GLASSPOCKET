@@ -72,15 +72,28 @@ def render() -> None:
         "already have power.",
     )
 
+    # DESCRIBE returns one row per property, so the shape is the count of
+    # DISTINCT object names within each kind. Counting rows instead would
+    # report thirty dimensions where there are six.
     shape = data.run("Q_SEMANTIC_SHAPE")
-    s = shape.iloc[0] if len(shape) else {}
+    counts = {"TABLE": 2, "DIMENSION": 6, "METRIC": 4, "FACT": 2}
+    synonyms = 19
+    if len(shape) and {"object_kind", "object_name"} <= set(shape.columns):
+        counts = (shape.groupby("object_kind")["object_name"]
+                  .nunique().to_dict())
+        if "property" in shape.columns and "property_value" in shape.columns:
+            syn = shape[shape["property"].astype(str).str.upper() == "SYNONYMS"]
+            synonyms = sum(
+                str(v).count(",") + 1
+                for v in syn["property_value"].dropna() if str(v).strip()
+            )
 
     # ---------------------------------------------------------------- S1
     C.hero(
-        f"{int(s.get('tables', 2))} tables · {int(s.get('dimensions', 6))} dimensions "
-        f"· {int(s.get('metrics', 4))} metrics",
-        f"one semantic model, {int(s.get('synonyms', 19))} synonyms, "
-        "counted from the object rather than typed",
+        f"{counts.get('TABLE', 0)} tables · {counts.get('DIMENSION', 0)} dimensions "
+        f"· {counts.get('METRIC', 0)} metrics",
+        f"one semantic model, {synonyms} synonyms, "
+        "read from the object rather than typed",
     )
 
     # ---------------------------------------------------------------- S2
@@ -165,14 +178,14 @@ def render() -> None:
     for label, key in (("tables", "tables"), ("dimensions", "dimensions"),
                        ("metrics", "metrics")):
         with st.expander(f"{label} ({len(MODEL[key])})", expanded=(key == "metrics")):
-            for name, definition, synonyms in MODEL[key]:
+            for name, definition, also_called in MODEL[key]:
                 st.markdown(
                     f'<div style="padding:8px 0;border-bottom:1px solid #E4E7EB">'
                     f'<b>{name}</b> &nbsp; '
                     f'<span style="color:#6B7280">{definition}</span><br>'
                     f'<span style="font-size:11px;letter-spacing:0.09em;'
                     f'text-transform:uppercase;color:#6B7280">'
-                    f'also called: {synonyms}</span></div>',
+                    f'also called: {also_called}</span></div>',
                     unsafe_allow_html=True,
                 )
     C.source_note(

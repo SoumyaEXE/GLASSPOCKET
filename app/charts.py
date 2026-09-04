@@ -523,12 +523,17 @@ def cohort_floor_curve(df) -> go.Figure:
             name="refused",
             hovertemplate="cohort %{x}: refused<extra></extra>",
         )
+    # Plotly positions shapes on a log axis in LOG UNITS. Passing the raw
+    # cohort numbers here draws the floor at 10^50 and stretches the axis
+    # to 10^48, which is how this chart first shipped.
+    import math
+
     fig.add_vrect(
-        x0=1, x1=floor,
+        x0=0, x1=math.log10(floor),
         fillcolor="rgba(229,72,77,0.07)", line_width=0, layer="below",
     )
     fig.add_vline(
-        x=floor, line=dict(color=FLAG_RED, width=2),
+        x=math.log10(floor), line=dict(color=FLAG_RED, width=2),
         annotation_text=f"floor {floor:.0f}",
         annotation_position="top",
         annotation_font=dict(family=FONT, size=12, color=FLAG_RED),
@@ -558,8 +563,11 @@ def query_log(df, floor: float) -> go.Figure:
         marker=dict(color=colours, cornerradius=3),
         hovertemplate="query %{x}: cohort %{y:,}<extra></extra>",
     )
+    # Same rule on the y axis: log units for the line, raw for the data.
+    import math
+
     fig.add_hline(
-        y=floor, line=dict(color=INK, width=1.5, dash="dash"),
+        y=math.log10(max(floor, 1)), line=dict(color=INK, width=1.5, dash="dash"),
         annotation_text=f"floor {floor:.0f}",
         annotation_position="top left",
         annotation_font=dict(family=FONT, size=12, color=INK),

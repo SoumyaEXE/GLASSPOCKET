@@ -86,6 +86,21 @@ def is_preview() -> bool:
 # ---------------------------------------------------------------------------
 
 
+def normalise(df: pd.DataFrame) -> pd.DataFrame:
+    """Lower-case every column name.
+
+    THIS IS NOT COSMETIC. Snowflake returns identifiers folded to upper
+    case; DuckDB returns them as written, which here is lower case. The
+    application is written against one spelling, so without this every
+    tab that touches a column by name works locally and dies inside the
+    warehouse with a bare KeyError like 'evasion_gap'. Normalising in the
+    one place every result passes through is the only way to be sure a
+    tab cannot forget.
+    """
+    df.columns = [str(c).lower() for c in df.columns]
+    return df
+
+
 @st.cache_data(ttl=60, show_spinner=False)
 def run(query_name: str, params: tuple | None = None) -> pd.DataFrame:
     """Execute a named query from app/queries.py.
@@ -99,8 +114,8 @@ def run(query_name: str, params: tuple | None = None) -> pd.DataFrame:
 
     if backend_mode == WAREHOUSE:
         if params:
-            return handle.sql(query.sql, params=list(params)).to_pandas()
-        return handle.sql(query.sql).to_pandas()
+            return normalise(handle.sql(query.sql, params=list(params)).to_pandas())
+        return normalise(handle.sql(query.sql).to_pandas())
 
     local = query.local
     if local.startswith("__"):
@@ -109,8 +124,8 @@ def run(query_name: str, params: tuple | None = None) -> pd.DataFrame:
             "explicitly by the tab that needs it."
         )
     if params:
-        return handle.execute(local, list(params)).df()
-    return handle.execute(local).df()
+        return normalise(handle.execute(local, list(params)).df())
+    return normalise(handle.execute(local).df())
 
 
 def run_sql_preview(sql: str, params: tuple | None = None) -> pd.DataFrame:
@@ -123,7 +138,7 @@ def run_sql_preview(sql: str, params: tuple | None = None) -> pd.DataFrame:
     backend_mode, handle = get_backend()
     if backend_mode != PREVIEW:
         raise RuntimeError("run_sql_preview is preview-only")
-    return handle.execute(sql, list(params or ())).df()
+    return normalise(handle.execute(sql, list(params or ())).df())
 
 
 def scalar(query_name: str, column: str, params: tuple | None = None,
@@ -217,7 +232,7 @@ def true_answer(filters: dict) -> dict:
             "AVG(delivered_flag) AS delivery_rate "
             "FROM PRIVILEGED.V_BENEFICIARY_OUTCOMES_TRUE " + where
         )
-        df = session.sql(sql, params=params).to_pandas()
+        df = normalise(session.sql(sql, params=params).to_pandas())
     else:
         df = run_sql_preview(
             "SELECT COUNT(*) AS cohort, SUM(amount_usd) AS total_usd, "
@@ -383,10 +398,10 @@ def differencing_demo(filters: dict) -> dict | None:
         try:
             if mode() == WAREHOUSE:
                 _, session = get_backend()
-                df = session.sql(
+                df = normalise(session.sql(
                     sql.format(obj="PRIVILEGED.V_BENEFICIARY_OUTCOMES_TRUE"),
                     params=params + [threshold],
-                ).to_pandas()
+                ).to_pandas())
             else:
                 df = run_sql_preview(sql.format(obj="beneficiary_facts"),
                                      tuple(params + [threshold]))

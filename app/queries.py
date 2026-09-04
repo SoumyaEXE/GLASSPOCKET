@@ -736,15 +736,21 @@ Q_APPLY_CHANGE = Query(
 # ===========================================================================
 
 Q_SEMANTIC_SHAPE = Query(
-    sql="""
-        SELECT COUNT(DISTINCT table_name) AS tables,
-               COUNT(DISTINCT CASE WHEN kind = 'DIMENSION' THEN name END) AS dimensions,
-               COUNT(DISTINCT CASE WHEN kind = 'METRIC'    THEN name END) AS metrics,
-               SUM(ARRAY_SIZE(COALESCE(synonyms, ARRAY_CONSTRUCT()))) AS synonyms
-        FROM MARTS.V_SEMANTIC_SHAPE
-    """,
+    # DESCRIBE is what actually reads the object. There is no
+    # INFORMATION_SCHEMA table listing a semantic view's dimensions and
+    # metrics, so the alternative would be typing the shape into the
+    # interface, which is exactly what this tab claims not to do.
+    sql="DESCRIBE SEMANTIC VIEW MARTS.GIVING_SEMANTICS",
     local="""
-        SELECT 2 AS tables, 6 AS dimensions, 4 AS metrics, 19 AS synonyms
+        SELECT * FROM (VALUES
+            ('TABLE','orgs'), ('TABLE','disb'),
+            ('DIMENSION','state'), ('DIMENSION','cause'), ('DIMENSION','city'),
+            ('DIMENSION','geometry_verdict'), ('DIMENSION','district'),
+            ('DIMENSION','status'),
+            ('METRIC','total_usd'), ('METRIC','flagged_pct'),
+            ('METRIC','delivered_usd'), ('METRIC','event_count'),
+            ('FACT','amount_usd'), ('FACT','pledged_usd')
+        ) AS t(object_kind, object_name)
     """,
     note="Counted from the object, never typed into the interface.",
 )

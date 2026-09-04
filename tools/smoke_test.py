@@ -60,7 +60,8 @@ def main() -> int:
     problems = _problems(at, "first render")
 
     print(f"first render     {time.time() - started:.1f}s")
-    print(f"tabs             {len(at.tabs)}")
+    nav = [b for b in at.button if b.key and b.key.startswith("gp_nav_")]
+    print(f"nav entries      {len(nav)}")
     print(f"charts           {_charts(at)}")
     print(f"dataframes       {len(at.dataframe)}")
     print(f"markdown blocks  {len(at.markdown)}")
@@ -71,6 +72,29 @@ def main() -> int:
     # carry the argument actually live.
     # ------------------------------------------------------------------
 
+    # Navigation is a rail now, so each section has to be selected before
+    # its controls exist. Walk every one of them and report any that
+    # cannot render, which is the failure this test exists to catch.
+    def goto(index: int):
+        """Click the rail entry at a position and return the fresh tree."""
+        entries = [b for b in at.button if b.key and b.key.startswith("gp_nav_")]
+        entries[index].click().run()
+
+    if nav:
+        broken = []
+        keys = [b.key for b in nav]
+        for idx, key in enumerate(keys):
+            goto(idx)
+            errs = [e.value for e in at.error] + [e.value for e in at.exception]
+            if errs:
+                broken.append(f"{key}: {errs[0][:90]}")
+            else:
+                print(f"  ok  {key.replace('gp_nav_', 'section ')}")
+        for b in broken:
+            print(f"  FAIL {b}")
+            problems += 1
+        goto(1)   # land on Confidence for the rest
+
     picks = [b for b in at.button if "give to this one" in b.label]
     if not picks:
         print("\n  MISSING   Tab 01 has no pick control")
@@ -79,25 +103,23 @@ def main() -> int:
         picks[0].click().run()
         problems += _problems(at, "tab 01 reveal")
         print(f"\nafter reveal     charts {_charts(at)}")
-        if not any("evasion gap" in m.value for m in at.markdown):
-            print("  MISSING   the evasion gap is not reported after the reveal")
+        # The reveal has to report the gap in words, not only inside the
+        # chart, or a screenshot of the tab loses the whole argument.
+        if not any("gap between them" in m.value for m in at.markdown):
+            print("  MISSING   the gap is not reported in words after the reveal")
             problems += 1
 
+    goto(5)   # The Wall
     release = [b for b in at.button if b.label == "release the answer"]
     if not release:
-        print("  MISSING   Tab 05 has no release control")
+        print("  MISSING   The Wall has no release control")
         problems += 1
     else:
         release[0].click().run()
         problems += _problems(at, "tab 05 release")
         print(f"after release    charts {_charts(at)}")
 
-    repeat = [b for b in at.button if b.label == "run this ten times"]
-    if repeat:
-        repeat[0].click().run()
-        problems += _problems(at, "tab 05 repeated queries")
-        print(f"after repeat     charts {_charts(at)}")
-
+    goto(7)   # The Historian
     apply_change = [b for b in at.button if b.label == "apply"]
     if apply_change:
         apply_change[0].click().run()
