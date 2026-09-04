@@ -73,6 +73,20 @@ CREATE ROLE IF NOT EXISTS GP_ANALYST;
 -- on Tab 05 possible: the tab shows the true answer beside the released
 -- answer, and the true answer has to come from somewhere.
 -- ---------------------------------------------------------------------
+-- A policy that is attached to a view cannot be replaced, so a re-run
+-- has to detach it first. Wrapped because on a first run there is
+-- nothing attached and nothing to detach.
+EXECUTE IMMEDIATE $$
+BEGIN
+  ALTER VIEW GLASSPOCKET.SERVING.V_BENEFICIARY_OUTCOMES
+    UNSET AGGREGATION POLICY;
+  RETURN 'detached the existing policy so it can be replaced';
+EXCEPTION
+  WHEN OTHER THEN
+    RETURN 'nothing attached yet, first run';
+END;
+$$;
+
 CREATE OR REPLACE AGGREGATION POLICY GLASSPOCKET.SERVING.beneficiary_policy
   AS () RETURNS AGGREGATION_CONSTRAINT ->
   CASE
@@ -131,9 +145,7 @@ CREATE OR REPLACE VIEW GLASSPOCKET.SERVING.V_BENEFICIARY_OUTCOMES_TRUE AS
   FROM GLASSPOCKET.MARTS.BENEFICIARY_FACTS;
 
 COMMENT ON VIEW GLASSPOCKET.SERVING.V_BENEFICIARY_OUTCOMES_TRUE IS
-  'COUNTERFACTUAL ONLY. The answer that would be released if no policy '
-  'existed. Rendered on Tab 05 beside the protected answer and labelled '
-  'as such. Never granted to GP_ANALYST.';
+  'COUNTERFACTUAL ONLY. The answer that would be released if no policy existed. Rendered on Tab 05 beside the protected answer and labelled as such. Never granted to GP_ANALYST.';
 
 -- ---------------------------------------------------------------------
 -- Cohort telemetry for the Tab 05 hero.
@@ -174,7 +186,9 @@ USE ROLE GP_ANALYST;
 USE WAREHOUSE GP_WH;
 USE DATABASE GLASSPOCKET;
 
--- 1. MUST FAIL.
+-- 1. MUST FAIL. A refusal here is the guarantee working, so the deploy
+-- runner is told to expect it.
+-- EXPECT_FAIL
 SELECT beneficiary_id, amount_usd
 FROM GLASSPOCKET.SERVING.V_BENEFICIARY_OUTCOMES
 LIMIT 10;

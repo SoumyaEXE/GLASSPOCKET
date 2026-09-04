@@ -60,8 +60,8 @@ CREATE OR REPLACE TABLE RAW.ORG_VECTORS (
 );
 
 COPY INTO RAW.ORG_VECTORS
-  FROM @RAW.GP_STAGE/vectors/
-  FILE_FORMAT = (FORMAT_NAME = RAW.FF_SYNTH_CSV)
+  FROM @RAW.GP_STAGE/vectors/org_vectors.csv
+  FILE_FORMAT = (FORMAT_NAME = RAW.FF_PREPARED)
   ON_ERROR = ABORT_STATEMENT;
 
 UPDATE STAGING.ORGS o
@@ -112,6 +112,37 @@ CREATE TABLE IF NOT EXISTS MARTS.GRAPH_EDGES (
   source_id  STRING,
   target_id  STRING,
   similarity FLOAT
+);
+
+-- Load them.
+--   PUT file://data/warehouse/projection.csv      @RAW.GP_STAGE/warehouse/;
+--   PUT file://data/warehouse/graph_nodes.csv     @RAW.GP_STAGE/warehouse/;
+--   PUT file://data/warehouse/graph_edges.csv     @RAW.GP_STAGE/warehouse/;
+--   PUT file://data/warehouse/threshold_curve.csv @RAW.GP_STAGE/warehouse/;
+
+TRUNCATE TABLE IF EXISTS MARTS.ORG_PROJECTION;
+COPY INTO MARTS.ORG_PROJECTION (org_id, pc1, pc2)
+  FROM @RAW.GP_STAGE/warehouse/projection.csv
+  FILE_FORMAT = (FORMAT_NAME = RAW.FF_PREPARED)
+  ON_ERROR = ABORT_STATEMENT;
+
+TRUNCATE TABLE IF EXISTS MARTS.GRAPH_NODES;
+COPY INTO MARTS.GRAPH_NODES (org_id, name, x, y, node_kind, degree)
+  FROM @RAW.GP_STAGE/warehouse/graph_nodes.csv
+  FILE_FORMAT = (FORMAT_NAME = RAW.FF_PREPARED)
+  ON_ERROR = ABORT_STATEMENT;
+
+TRUNCATE TABLE IF EXISTS MARTS.GRAPH_EDGES;
+COPY INTO MARTS.GRAPH_EDGES (source_id, target_id, similarity)
+  FROM @RAW.GP_STAGE/warehouse/graph_edges.csv
+  FILE_FORMAT = (FORMAT_NAME = RAW.FF_PREPARED)
+  ON_ERROR = ABORT_STATEMENT;
+
+-- The threshold sweep. Precomputed so the Tab 02 slider responds with no
+-- query behind it, and recomputed in SQL by 07 when the corpus changes.
+CREATE TABLE IF NOT EXISTS MARTS.THRESHOLD_CURVE (
+  threshold FLOAT, pairs_detected INT,
+  pairs_ai_confirmed INT, is_production_value BOOLEAN
 );
 
 INSERT INTO MARTS.BUILD_LOG (step, detail)

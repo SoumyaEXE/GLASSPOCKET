@@ -836,13 +836,13 @@ Q_CONFIDENCE_COUNT = Query(
 
 Q_PROVENANCE = Query(
     sql="""
-        SELECT table_name, batch_id, rows
+        SELECT table_name, batch_id, row_count
         FROM SERVING.V_PROVENANCE
-        ORDER BY rows DESC
+        ORDER BY row_count DESC
         LIMIT 40
     """,
     local="""
-        SELECT 'STAGING.ORGS' AS table_name, batch_id, COUNT(*) AS rows
+        SELECT 'STAGING.ORGS' AS table_name, batch_id, COUNT(*) AS row_count
           FROM staging_orgs GROUP BY batch_id
         UNION ALL
         SELECT 'STAGING.DISBURSEMENTS', batch_id, COUNT(*)
@@ -852,7 +852,7 @@ Q_PROVENANCE = Query(
           FROM staging_beneficiaries GROUP BY batch_id
         UNION ALL
         SELECT 'ORACLE.MINT_LOG', 'SOLANA_DEVNET', COUNT(*) FROM mint_log
-        ORDER BY rows DESC
+        ORDER BY row_count DESC
     """,
     note="Counted live so the honesty table cannot drift from reality.",
 )
@@ -873,7 +873,7 @@ Q_HONESTY_TOTALS = Query(
 
 Q_CORPUS_NOTE = Query(
     sql="""
-        SELECT COUNT(*) AS rows_loaded, COUNT(*) AS rows_available
+        SELECT COUNT(*) AS row_count_loaded, COUNT(*) AS row_count_available
         FROM STAGING.ORGS WHERE batch_id = 'IRS_BMF_2026'
     """,
     local="""

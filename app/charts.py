@@ -11,8 +11,10 @@ rather than remembered:
   * Colour carries meaning strictly according to the palette, so a red
     bar always means flagged and an amber line always means privacy
     noise.
-  * Animation is used exactly twice in the whole application: the Tab 01
-    reveal and the Tab 05 noise curve.
+  * Animation is used once in the whole application: the Tab 01 reveal.
+    The specification permits a second, a sweep over the Tab 05 noise
+    curve, but that chart does not exist in this build: the deployment
+    has no differential privacy DDL, so there is no noise to sweep over.
 """
 
 from __future__ import annotations
@@ -484,119 +486,81 @@ def transit_feasibility(df, max_kmh: float = 90.0) -> go.Figure:
 # ---------------------------------------------------------------------------
 
 
-def noise_curve(df, animate: bool = False) -> go.Figure:
-    """True value in ink, released value in Noise Amber with a shaded band.
+def cohort_floor_curve(df) -> go.Figure:
+    """Which cohort sizes get an answer at all.
 
-    X is cohort size, logarithmic, one to ten thousand. Lines converge
-    right and diverge violently left. This is the picture of a privacy
-    guarantee.
+    Replaces the noise-against-cohort curve the specification asks for in
+    a differential privacy build. There is no noise here to draw, so the
+    chart draws what is true: a hard vertical line at the floor, nothing
+    released to the left of it, the exact value released to the right.
     """
+    floor = float(df["floor"].iloc[0]) if len(df) else 50.0
+    answered = df[df["answered"]]
+    refused = df[~df["answered"]]
+
     fig = go.Figure()
     fig.add_scatter(
-        x=df["cohort"], y=df["released_hi"], mode="lines",
-        line=dict(width=0), hoverinfo="skip", showlegend=False,
-    )
-    fig.add_scatter(
-        x=df["cohort"], y=df["released_lo"], mode="lines",
-        line=dict(width=0), fill="tonexty",
-        fillcolor="rgba(245,166,35,0.16)",
-        name="plausible range", hoverinfo="skip",
-    )
-    fig.add_scatter(
         x=df["cohort"], y=df["true_value"], mode="lines",
-        line=dict(color=INK, width=2.5),
+        line=dict(color=INK, width=2, dash="dot"),
         name="true value",
         hovertemplate="cohort %{x}: %{y:,.0f}<extra></extra>",
     )
     fig.add_scatter(
-        x=df["cohort"], y=df["released_value"], mode="lines",
-        line=dict(color=NOISE_AMBER, width=2.5),
-        name="released value",
-        hovertemplate="cohort %{x}: %{y:,.0f}<extra></extra>",
+        x=answered["cohort"], y=answered["released_value"], mode="lines",
+        line=dict(color=CONFIRMED_GREEN, width=3),
+        name="released, exactly",
+        hovertemplate="cohort %{x}: %{y:,.0f} released<extra></extra>",
+    )
+    if len(refused):
+        fig.add_scatter(
+            x=refused["cohort"], y=[0] * len(refused), mode="markers",
+            marker=dict(size=7, color=FLAG_RED, symbol="x"),
+            name="refused",
+            hovertemplate="cohort %{x}: refused<extra></extra>",
+        )
+    fig.add_vrect(
+        x0=1, x1=floor,
+        fillcolor="rgba(229,72,77,0.07)", line_width=0, layer="below",
+    )
+    fig.add_vline(
+        x=floor, line=dict(color=FLAG_RED, width=2),
+        annotation_text=f"floor {floor:.0f}",
+        annotation_position="top",
+        annotation_font=dict(family=FONT, size=12, color=FLAG_RED),
     )
     fig.update_xaxes(type="log", title=dict(
         text="cohort size", font=dict(family=FONT, size=12, color=TEXT_MUTED)))
-    # Both axes are logarithmic. On a linear y axis the large right-hand
-    # values dominate and the divergence at the left, which is the entire
-    # point of the chart, becomes invisible.
-    fig.update_yaxes(type="log", title=dict(
+    fig.update_yaxes(title=dict(
         text="value released", font=dict(family=FONT, size=12, color=TEXT_MUTED)))
-    fig = style_fig(fig, height=360, legend=True)
-
-    if animate:
-        # On first render only, sweep a marker right to left over roughly
-        # 1.4 seconds, so the divergence is felt rather than read. This is
-        # the second and final permitted animation in the application.
-        sweep = df.iloc[::-1].reset_index(drop=True)
-        step_ms = max(20, int(1400 / max(len(sweep), 1)))
-        fig.add_scatter(
-            x=[sweep["cohort"].iloc[0]], y=[sweep["released_value"].iloc[0]],
-            mode="markers",
-            marker=dict(size=13, color=NOISE_AMBER,
-                        line=dict(width=2, color="#FFFFFF")),
-            name="sweep", showlegend=False, hoverinfo="skip",
-        )
-        fig.frames = [
-            go.Frame(data=[go.Scatter(x=[row.cohort], y=[row.released_value])],
-                     traces=[len(fig.data) - 1], name=str(i))
-            for i, row in enumerate(sweep.itertuples())
-        ]
-        fig.update_layout(
-            updatemenus=[dict(
-                type="buttons", visible=False, showactive=False,
-                buttons=[dict(
-                    label="play", method="animate",
-                    args=[None, dict(
-                        frame=dict(duration=step_ms, redraw=False),
-                        transition=dict(duration=0),
-                        fromcurrent=True, mode="immediate")],
-                )],
-            )],
-        )
-
-    return fig
+    return style_fig(fig, height=340, legend=True)
 
 
-def budget_burndown(df) -> go.Figure:
-    """Per-query consumption, stacked. A narrow query costs far more."""
+def query_log(df, floor: float) -> go.Figure:
+    """One bar per question asked, coloured by whether it was refused.
+
+    Deliberately NOT a budget burn-down: a minimum-cohort guarantee has no
+    budget, and drawing one would imply a protection this build does not
+    provide. What it shows instead is the cohort each question reached,
+    against the floor that decided it.
+    """
+    colours = [FLAG_RED if refused else CONFIRMED_GREEN
+               for refused in df["refused"]]
     fig = go.Figure()
     fig.add_bar(
-        x=df["query_n"], y=df["epsilon_spent"],
-        marker=dict(color=[
-            FLAG_RED if narrow else NOISE_AMBER for narrow in df["is_narrow"]
-        ], cornerradius=3),
-        hovertemplate="query %{x}: epsilon %{y:.4f}<extra></extra>",
+        x=df["query_n"], y=df["cohort"],
+        marker=dict(color=colours, cornerradius=3),
+        hovertemplate="query %{x}: cohort %{y:,}<extra></extra>",
     )
-    fig.update_xaxes(title=dict(text="query", font=dict(
-        family=FONT, size=12, color=TEXT_MUTED)), dtick=1)
-    return style_fig(fig, height=280)
-
-
-def repeated_query_box(samples, true_value: float) -> go.Figure:
-    """Spread of released answers across repeated identical queries.
-
-    Tight around the truth for a large cohort, enormous and centred
-    nowhere useful for a cohort of one. This is what defeats the averaging
-    objection.
-    """
-    fig = go.Figure()
-    fig.add_box(
-        x=samples,
-        marker=dict(color=NOISE_AMBER),
-        line=dict(color=NOISE_AMBER, width=1.5),
-        fillcolor="rgba(245,166,35,0.18)",
-        boxpoints="all", jitter=0.5, pointpos=0,
-        name="released answers",
-        hovertemplate="%{x:,.0f}<extra></extra>",
-    )
-    fig.add_vline(
-        x=true_value, line=dict(color=INK, width=2),
-        annotation_text="true value",
-        annotation_position="top",
+    fig.add_hline(
+        y=floor, line=dict(color=INK, width=1.5, dash="dash"),
+        annotation_text=f"floor {floor:.0f}",
+        annotation_position="top left",
         annotation_font=dict(family=FONT, size=12, color=INK),
     )
-    fig.update_yaxes(visible=False)
-    return style_fig(fig, height=260)
+    fig.update_xaxes(title=dict(text="question", font=dict(
+        family=FONT, size=12, color=TEXT_MUTED)), dtick=1)
+    fig.update_yaxes(type="log")
+    return style_fig(fig, height=280)
 
 
 # ---------------------------------------------------------------------------

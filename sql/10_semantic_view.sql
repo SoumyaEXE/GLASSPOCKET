@@ -38,7 +38,7 @@ CREATE OR REPLACE SEMANTIC VIEW MARTS.GIVING_SEMANTICS
       WITH SYNONYMS ('sector', 'category', 'programme area'),
     orgs.city     AS city
       WITH SYNONYMS ('town'),
-    disb.geometry_verdict AS verdict
+    disb.verdict  AS geometry_verdict
       WITH SYNONYMS ('geometry verdict', 'plausibility'),
     disb.district AS district
       WITH SYNONYMS ('area', 'locality'),
@@ -63,8 +63,7 @@ CREATE OR REPLACE SEMANTIC VIEW MARTS.GIVING_SEMANTICS
 -- browser cannot drift from the definition.
 -- ---------------------------------------------------------------------
 SHOW SEMANTIC VIEWS LIKE 'GIVING_SEMANTICS' IN SCHEMA MARTS;
-SHOW SEMANTIC DIMENSIONS IN SEMANTIC VIEW MARTS.GIVING_SEMANTICS;
-SHOW SEMANTIC METRICS    IN SEMANTIC VIEW MARTS.GIVING_SEMANTICS;
+DESCRIBE SEMANTIC VIEW MARTS.GIVING_SEMANTICS;
 
 -- ---------------------------------------------------------------------
 -- The three preset questions, wired to hand-written SQL over the same
@@ -93,7 +92,7 @@ ORDER BY imitations_per_100 DESC;
 CREATE OR REPLACE VIEW SERVING.V_ASK_FLAGGED_BY_STATE AS
 SELECT * FROM SEMANTIC_VIEW(
   MARTS.GIVING_SEMANTICS
-  DIMENSIONS state
+  DIMENSIONS orgs.state
   METRICS    disb.flagged_pct, disb.event_count
 )
 ORDER BY flagged_pct DESC;

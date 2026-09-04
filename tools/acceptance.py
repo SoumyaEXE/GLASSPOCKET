@@ -128,6 +128,12 @@ def integrity() -> None:
         "Clone detection found a workable number of pairs",
         50 <= one("SELECT COUNT(*) FROM clone_pairs") <= 5000,
     )
+    check(
+        "DAT-08", "data",
+        "Every confirmed pair records how it was confirmed",
+        one("SELECT COUNT(*) FROM clone_confirmed "
+            "WHERE confirmation_method IS NULL") == 0,
+    )
 
     con.close()
 
@@ -224,6 +230,37 @@ def craft() -> None:
         not unbounded,
     )
 
+    # The build must not claim a guarantee the platform did not give it.
+    # Tab 05 ships a minimum-cohort floor, so it may name differential
+    # privacy only to say it is NOT what is running.
+    wall_lines = (app / "tabs" / "tab_05_wall.py").read_text(
+        encoding="utf-8").splitlines()
+    # Permitted only where the surrounding sentence draws a contrast with
+    # differential privacy, never where it asserts the build has it. The
+    # window is needed because the copy wraps across several source lines.
+    contrast = ("not ", "rather than", "does not", "unavailable", "no ",
+                "instead", "difference", "cannot", "would", "specif",
+                "defends", "fallback")
+    claims = []
+    for idx, line in enumerate(wall_lines):
+        if "differential privacy" not in line.lower():
+            continue
+        window = "\n".join(wall_lines[max(0, idx - 4): idx + 5]).lower()
+        if not any(t in window for t in contrast):
+            claims.append(line.strip())
+    check(
+        "CRF-11", "craft",
+        f"Tab 05 never claims differential privacy"
+        f"{' (' + claims[0][:50] + ')' if claims else ''}",
+        not claims,
+    )
+    check(
+        "CRF-12", "craft",
+        "The substitution is disclosed on the Method tab",
+        "platform would not give us"
+        in (app / "tabs" / "tab_10_method.py").read_text(encoding="utf-8"),
+    )
+
     # Framing rule. The word fraud may appear only where a source is quoted.
     banned = re.compile(r"(?i)\b(fraudulent|criminal|scam|guilty)\b")
     hits = []
@@ -310,6 +347,13 @@ def hygiene() -> None:
         "The README carries the honesty table",
         "What is real and what is simplified"
         in (ROOT / "README.md").read_text(encoding="utf-8"),
+    )
+    check(
+        "REP-03", "repo",
+        "The platform constraints are documented with the actual errors",
+        (ROOT / "docs" / "platform_constraints.md").exists()
+        and "not available for trial accounts"
+        in (ROOT / "docs" / "platform_constraints.md").read_text(encoding="utf-8"),
     )
 
 

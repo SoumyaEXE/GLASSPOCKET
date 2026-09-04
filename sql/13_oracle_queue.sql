@@ -142,7 +142,7 @@ $$;
 CREATE OR REPLACE VIEW ORACLE.V_QUEUE_STATUS AS
 SELECT
   status,
-  COUNT(*)      AS rows,
+  COUNT(*)      AS row_count,
   MIN(claimed_at) AS oldest_claim,
   MAX(claimed_at) AS newest_claim
 FROM ORACLE.MINT_QUEUE

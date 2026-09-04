@@ -1,25 +1,31 @@
-"""Tab 05 / The Wall. Build Spec Section 07.
+"""Tab 05 / The Wall. Build Spec Section 07, with the Section 10 fallback.
 
-    Now try to use this tool to find one specific person. You will not be
-    able to.
+    Now try to use this tool to find one specific person.
 
 THIS IS THE CENTREPIECE AND IT IS NEVER CUT.
 
 Every tab before it shows the system finding things. This one shows the
-system refusing to find something, on purpose, with a mathematical
-guarantee. It is the strongest single screen in the submission.
+system refusing to find something, on purpose, and then shows you exactly
+where that refusal stops working.
 
-The line to deliver over the diverging lines of C05-1:
+WHAT SHIPS HERE, AND WHY IT IS NOT WHAT THE SPEC ASKED FOR
+    The spec specifies a Snowflake privacy policy with a differential
+    privacy budget. That DDL does not parse on the target deployment:
 
-    "Every accountability project has the same unsolved problem. To prove
-    aid reached people you have to publish data about those people. This
-    is the part where the tool protects them from me, from you, and from
-    itself."
+        CREATE PRIVACY BUDGET ...  -> syntax error, unexpected 'BUDGET'
+        ALTER VIEW ... SET PRIVACY POLICY ... -> syntax error
+
+    Section 10 supplies the fallback, and this tab takes it: an
+    aggregation policy with MIN_GROUP_SIZE => 50, relabelled honestly as
+    a minimum-cohort guarantee rather than a differential privacy one.
+
+    The refusal is real and Snowflake enforces it. The noise and the
+    budget are absent, and section S6 demonstrates the attack that
+    absence leaves open rather than hiding it.
 """
 
 from __future__ import annotations
 
-import numpy as np
 import streamlit as st
 
 import charts
@@ -42,20 +48,17 @@ def _ledger() -> data.PrivacyLedger:
 
 def render() -> None:
     ledger = _ledger()
+    floor = data.cohort_floor()
 
-    # ---------------------------------------------------------------- S1
-    # Hero. Live remaining privacy budget, counting down as the viewer
-    # queries. Not a printed number: it moves while you watch.
     C.tab_title(
         "The Wall",
-        "Now try to use this tool to find one specific person. "
-        "You will not be able to.",
+        "Now try to use this tool to find one specific person.",
     )
-    C.hero(
-        f"{ledger.share_remaining * 100:.0f}%",
-        "privacy budget remaining in this window",
-    )
-    C.meter(ledger.share_remaining)
+
+    # ---------------------------------------------------------------- S1
+    # Hero. The floor itself, because that is the number that governs
+    # every answer this tab will and will not give.
+    C.hero(str(floor), "beneficiaries: the smallest group this tool will answer about")
 
     st.markdown(
         "Everything so far has been this system finding things. "
@@ -63,7 +66,6 @@ def render() -> None:
     )
 
     # ---------------------------------------------------------------- S2
-    # Filter console. This is the attack surface.
     C.section("Narrow the question")
 
     options = data.run("Q_FILTER_OPTIONS")
@@ -71,8 +73,6 @@ def render() -> None:
     programmes = ["any"] + sorted(options["programme_code"].dropna().unique().tolist())
     months = ["any"] + sorted(options["month_key"].dropna().unique().tolist())
 
-    # A district selected on Tab 04 arrives here, so the handoff between
-    # the two tabs is real rather than narrated.
     carried = st.session_state.get("gp_focus_district")
     district_index = districts.index(carried) if carried in districts else 0
     if carried:
@@ -102,35 +102,31 @@ def render() -> None:
     truth = data.true_answer(filters)
     cohort = truth["cohort"]
 
-    # Cohort chip. Amber under fifty, red at one.
-    if cohort <= 1:
-        tone, note = "flagged", "cohort of one"
-    elif cohort < 50:
-        tone, note = "seeded", f"estimated cohort: {cohort} people"
+    if cohort < floor:
+        tone = "flagged"
+        note = f"cohort of {cohort:,}: below the floor, this will be refused"
+    elif cohort < floor * 3:
+        tone = "seeded"
+        note = f"cohort of {cohort:,}: close to the floor"
     else:
-        tone, note = "verified", f"estimated cohort: {cohort:,} people"
+        tone = "verified"
+        note = f"cohort of {cohort:,}"
     st.markdown(C.chip(note, tone), unsafe_allow_html=True)
 
     if st.button("release the answer", type="primary", key="gp_w_ask"):
         st.session_state["gp_w_last"] = data.released_answer(filters, ledger)
-        # Rerun so the hero reports the budget AFTER this query has been
-        # charged for. A budget meter that lags the query it paid for
-        # would undercut the whole point of the tab.
         st.rerun()
 
     released = st.session_state.get("gp_w_last")
 
     # ---------------------------------------------------------------- S3
-    # Dual columns. True answer beside released answer, labelled
-    # unambiguously. The left column is the counterfactual that would
-    # exist without the policy.
     C.section("Without the policy, and through it")
 
     if released is None:
         st.markdown(
             '<div class="gp-source">Choose filters and release an answer. '
-            'Start broad, then narrow, and watch the two columns separate.'
-            '</div>',
+            'Start broad, then narrow, and watch the right-hand column stop '
+            'answering.</div>',
             unsafe_allow_html=True,
         )
     elif released.get("refused"):
@@ -147,157 +143,140 @@ def render() -> None:
             },
         )
         st.markdown(
-            C.chip("the guarantee held: the query was refused", "flagged"),
-            unsafe_allow_html=True,
+            f"**Cohort of {cohort:,}. Below the floor of {floor}, so nothing "
+            "is released at all. This is the guarantee working.**"
         )
     else:
-        divergence = abs(released["total_usd"] - truth["total_usd"])
-        share = divergence / max(truth["total_usd"], 1)
         C.compare_columns(
             {
                 "label": "without the policy",
                 "value": C.usd(truth["total_usd"], precise=True),
-                "sub": f"count {truth['cohort']:,} · the true answer, ink",
+                "sub": f"count {truth['cohort']:,} · the true answer",
             },
             {
                 "label": "through the policy",
                 "value": C.usd(released["total_usd"], precise=True),
-                "sub": (f"count ~{released['cohort']:,.0f} · the released answer"
-                        + (" · large" if share > 0.25 else "")),
+                "sub": f"count {released['cohort']:,.0f} · released exactly",
             },
+            right_tone="truth",
         )
-        if cohort <= 1:
-            st.markdown(
-                "Cohort of one. The released answer is now noise, and your "
-                "privacy budget is spent. This is the guarantee working."
-            )
-        elif share > 0.25:
-            st.markdown(
-                f"The two columns differ by {C.usd(divergence)}. The narrower "
-                "the question, the more the answer has to be protected."
-            )
-        else:
-            st.markdown(
-                "The cohort is large, so the released answer sits close to the "
-                "true one. The guarantee costs almost nothing here, which is "
-                "the point: it only bites when a question gets personal."
-            )
-
-    if data.is_preview():
-        C.source_note(
-            "Preview mode. The noise here is a local Laplace mechanism with a "
-            "real epsilon ledger, not the Snowflake privacy policy. In the "
-            "deployed build the policy is attached to "
-            "SERVING.V_BENEFICIARY_OUTCOMES with an entity key on "
-            "beneficiary_id, and Snowflake applies the noise."
+        st.markdown(
+            f"The group clears the floor, so the answer is released **exactly**. "
+            "A minimum-cohort guarantee does not perturb what it does release. "
+            "That is the difference between this and a differential privacy "
+            "guarantee, and it matters below."
         )
 
     # ---------------------------------------------------------------- S4
-    # The picture of a privacy guarantee.
-    C.section("Noise against cohort size")
-    curve = data.noise_curve_frame(filters)
+    C.section("What gets answered")
     st.plotly_chart(
-        charts.noise_curve(curve, animate=not st.session_state.get("gp_w_seen")),
+        charts.cohort_floor_curve(data.floor_curve(filters)),
         use_container_width=True, config=charts.bare_config(),
     )
-    st.session_state["gp_w_seen"] = True
     C.source_note(
-        "Lines converge to the right and diverge violently to the left. A "
-        "question about ten thousand people is answered almost exactly. A "
-        "question about one person is not answered at all."
+        f"Left of the line the tool returns nothing, however the question is "
+        f"phrased. Right of it the true value is released. The floor is "
+        f"{floor} entities, counted by beneficiary rather than by row, so one "
+        "person contributing many rows does not satisfy it alone."
     )
 
     # ------------------------------------------------------------ S5, S6
     left, right = st.columns(2, gap="medium")
 
     with left:
-        C.section("Budget burn-down")
-        burndown = ledger.burndown()
-        if burndown.empty:
-            st.markdown(
-                '<div class="gp-source">No budget spent yet this session.</div>',
-                unsafe_allow_html=True,
-            )
+        C.section("Query log")
+        log = ledger.log()
+        if log.empty:
+            st.markdown('<div class="gp-source">No questions asked yet '
+                        'this session.</div>', unsafe_allow_html=True)
         else:
             st.plotly_chart(
-                charts.budget_burndown(burndown),
+                charts.query_log(log, floor),
                 use_container_width=True, config=charts.bare_config(),
             )
             C.source_note(
-                "Red bars are narrow queries. A narrow question costs far more "
-                "budget than a broad one, because isolating few people raises "
-                "the sensitivity of the answer."
+                f"{ledger.asked} asked, {ledger.refused} refused. Note that "
+                "the count of questions never limits anything: there is no "
+                "budget here, and a refused query costs the attacker nothing "
+                "but a retry."
             )
 
     with right:
-        C.section("Repeated queries")
-        if st.button("run this ten times", key="gp_w_repeat"):
-            st.session_state["gp_w_samples"] = data.repeated_releases(filters, n=40)
-        samples = st.session_state.get("gp_w_samples")
-        if samples:
-            st.plotly_chart(
-                charts.repeated_query_box(samples, truth["total_usd"]),
-                use_container_width=True, config=charts.bare_config(),
-            )
-            spread = float(np.std(samples))
-            C.source_note(
-                f"Spread {C.usd(spread)} around a true value of "
-                f"{C.usd(truth['total_usd'])}. Repeated attempts do not average "
-                "toward the truth, because in a real deployment the budget "
-                "depletes long before enough samples exist."
-            )
-        else:
+        C.section("What this does not stop")
+        demo = data.differencing_demo(filters)
+        if demo is None:
             st.markdown(
-                '<div class="gp-source">Defeats the averaging objection: ask '
-                'the same question repeatedly and see where the answers land.'
-                '</div>',
+                '<div class="gp-source">Widen the filters to see the '
+                'differencing attack this floor cannot prevent.</div>',
                 unsafe_allow_html=True,
             )
+        else:
+            a, b = demo["group_a"], demo["group_b"]
+            st.markdown(
+                f"Two questions, **both allowed**, because both groups clear "
+                f"the floor of {demo['floor']}:"
+            )
+            st.markdown(
+                f"- everyone in scope: **{a['cohort']:,}** people, "
+                f"{C.usd(a['total_usd'])}\n"
+                f"- everyone receiving at least "
+                f"{C.usd(demo['threshold'], precise=True)}: "
+                f"**{b['cohort']:,}** people, {C.usd(b['total_usd'])}"
+            )
+            st.markdown(
+                f"Subtract them and you have learned about "
+                f"**{demo['difference_people']} people** who never formed a "
+                f"group large enough to ask about directly, and that they "
+                f"received {C.usd(abs(demo['difference_usd']))} between them."
+            )
+            st.markdown(
+                C.chip("a cohort floor does not prevent this", "flagged"),
+                unsafe_allow_html=True,
+            )
+            C.source_note(
+                "Differential privacy is the thing that defends against a "
+                "sequence of overlapping queries, because every query costs "
+                "budget whether or not it is answered. This deployment does "
+                "not offer it, so this build does not claim it."
+            )
 
-    # Reset control. Demo mode only, and the interface says so.
-    reset_col, note_col = st.columns([1, 4], gap="small")
-    with reset_col:
-        if st.button("reset budget", key="gp_w_reset"):
-            ledger.reset()
-            st.session_state.pop("gp_w_last", None)
-            st.session_state.pop("gp_w_samples", None)
-            st.rerun()
-    with note_col:
+    if data.is_preview():
         C.source_note(
-            "Demo mode only. A production deployment would not expose a budget "
-            "reset, because being able to refill the budget is the same as not "
-            "having one."
+            "Preview mode. The floor is applied in Python here. In the "
+            "deployed build it is an aggregation policy attached to "
+            "SERVING.V_BENEFICIARY_OUTCOMES with an entity key on "
+            "beneficiary_id, and Snowflake does the refusing."
         )
 
     # ---------------------------------------------------------------- S7
     C.section("What this costs")
     C.step_explainer([
         (
-            "What differential privacy guarantees",
-            "Any single person's record can be added or removed from this "
-            "dataset without meaningfully changing any answer the system "
-            "releases. That is a mathematical property, not a promise.",
+            "What this guarantees",
+            f"No aggregate is released over fewer than {floor} beneficiaries. "
+            "Snowflake enforces it on the object, so changing the query, the "
+            "tool or the client does not get around it.",
         ),
         (
-            "What it cannot do",
-            "It does not make the data anonymous, it does not stop a "
-            "determined operator with direct table access, and it cannot "
-            "protect a person who is the only member of every cohort they "
-            "belong to.",
+            "What it does not guarantee",
+            "It adds no noise, so released answers are exact. It has no "
+            "budget, so asking is free. Two large permitted queries can be "
+            "subtracted to learn about a handful of people, as above.",
         ),
         (
-            "Why we pay for it",
-            "To prove aid reached people you have to publish data about "
-            "those people. Noise and a finite budget are the price of "
-            "publishing the finding without publishing the person.",
+            "What was intended, and why it is not here",
+            "A differential privacy policy with a per-query epsilon budget. "
+            "The DDL does not parse on this deployment. The attempt, the "
+            "error and the substitution are documented in "
+            "docs/platform_constraints.md and on the Method tab.",
         ),
     ])
 
     C.provenance_footer(
         "Entirely synthetic beneficiary records. No real personal data enters "
         "this project at any point, which is itself the correct engineering "
-        "decision. The protected object is SERVING.V_BENEFICIARY_OUTCOMES with "
-        "a privacy policy and an entity key on beneficiary_id. The true column "
-        "reads the unprotected twin under a privileged role, and both are "
-        "labelled on screen."
+        "decision. The protected object is SERVING.V_BENEFICIARY_OUTCOMES "
+        "with an aggregation policy and an entity key on beneficiary_id. The "
+        "true column reads the unprotected twin under a privileged role, and "
+        "both are labelled on screen."
     )

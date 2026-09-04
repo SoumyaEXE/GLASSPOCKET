@@ -3,7 +3,7 @@
 **A Snowflake accountability engine for charitable giving.**
 
 Multi-tab Streamlit application, Solana compressed-NFT receipt ledger,
-differential privacy serving layer.
+governed serving layer with an enforced minimum-cohort guarantee.
 
 > Generosity fails not because people stop giving but because they cannot see
 > where the money went. This is the machinery that lets them see.
@@ -44,8 +44,8 @@ frequently diverted before it reaches a beneficiary, and the sector's answer is
 a PDF annual report published nine months later. GLASSPOCKET attacks both
 halves: it detects impersonation by meaning rather than spelling, it detects
 diversion by geography and timing, it publishes the resulting statistics under a
-mathematical privacy guarantee so that beneficiaries cannot be re-identified,
-and it writes a public, tamper-evident receipt for every verified disbursement
+governance policy that refuses to answer about small groups of people, and it
+writes a public, tamper-evident receipt for every verified disbursement
 so a donor can check the claim without trusting anybody.
 
 ## Evidence
@@ -100,7 +100,7 @@ cited source.
 
 | Tool | Version | Used for |
 | --- | --- | --- |
-| Snowflake | **Enterprise Edition or higher** | Differential privacy is Enterprise-gated |
+| Snowflake | **Enterprise Edition or higher** | Aggregation policies and 90-day Time Travel are Enterprise-gated |
 | Node | 20 LTS or later | Bridge, Umi, Bubblegum |
 | Solana CLI | current stable | Keypair generation, devnet airdrop |
 | Python | 3.11 (matches the Streamlit warehouse runtime) | Offline preparation |
@@ -108,11 +108,14 @@ cited source.
 > **Trap 01, unrecoverable.** Cloud platform, region and edition are chosen at
 > Snowflake signup and **cannot be changed afterwards**. Selecting Standard
 > makes the centrepiece of this build permanently unavailable on that account,
-> and the only remedy is a new trial. Verify immediately after login:
+> and the only remedy is a new trial.
 >
-> ```sql
-> SELECT CURRENT_EDITION();
-> ```
+> `CURRENT_EDITION()` is an unknown function on some deployments, so
+> `sql/00_account_setup.sql` establishes the edition by behaviour instead: it
+> creates a scratch database, sets 90-day retention and creates an aggregation
+> policy, both Enterprise-gated, then drops it. It also probes for the
+> differential privacy DDL and the AI functions and reports whether each is
+> available, so you learn in minute one rather than at hour eleven.
 
 > **Trap 04, do it in the first ten minutes.** Accept **External Offerings
 > Terms** in Snowsight. `st.pydeck_chart` draws tiles from Carto, a third-party
@@ -215,7 +218,24 @@ To develop locally against the preview store:
 ```bash
 streamlit run app/glasspocket_app.py
 python tools/smoke_test.py        # renders every tab and every interactive path
+python tools/acceptance.py        # the Section 11 criteria checkable offline
 ```
+
+### Deploying
+
+```bash
+python tools/embed_offline.py         # arctic-embed vectors, once
+python tools/export_for_snowflake.py  # prepared corpus for staging
+python tools/deploy.py --check        # connect and report, change nothing
+python tools/deploy.py --all          # provision, stage, load, verify
+python tools/deploy.py --only 07      # re-run one numbered file
+```
+
+`tools/deploy.py` reads the repository-root `.env`, never prints a credential,
+and binds `RECEIPT_SALT` as a session variable for the one statement that needs
+it. Statements marked `-- EXPECT_FAIL` are ones that are *supposed* to be
+refused: the row-level `SELECT` in `sql/11` proves the policy is protecting the
+view, and a build where it succeeds is the broken one.
 
 ---
 
@@ -281,10 +301,44 @@ plus personal data is a harm that cannot be undone.
 | Beneficiary records | Nothing | Entirely synthetic. Handling real beneficiary data here would be unethical. |
 | Attrition rates | Calibrated against published WFP truck figures | Individual delivery events are modelled |
 | On-chain receipts | Genuinely minted and independently verifiable | Solana devnet, not mainnet |
-| Privacy guarantee | A real Snowflake privacy policy with real noise and a real budget | Epsilon tuned for demonstration legibility rather than production |
+| Privacy guarantee | A real Snowflake aggregation policy enforcing a minimum cohort of 50, attached to a terminal serving view with an entity key | A **minimum-cohort guarantee, not differential privacy**. The DP DDL does not parse on this deployment. No noise, no query budget. |
+| Embeddings | Genuine `snowflake-arctic-embed-m` vectors in a `VECTOR(FLOAT, 768)` column; all similarity search runs in Snowflake | Generated offline, because AI functions are blocked on trial accounts |
+| Clone confirmation | Nothing | `AI_FILTER` is blocked on trial accounts, so confirmation is two SQL predicates; every row carries `confirmation_method = 'HEURISTIC'` |
+
+### What the platform would not give us
+
+Two features this build was designed around are unavailable on the account it
+runs on. Both were found by running the statement, not by reading the docs, and
+both are documented with their exact errors in
+[`docs/platform_constraints.md`](docs/platform_constraints.md).
+
+**Differential privacy.** `CREATE PRIVACY BUDGET` and
+`ALTER VIEW ... SET PRIVACY POLICY` do not parse on this deployment — the
+keywords are unknown, so no grant fixes it. The account *is* Enterprise Edition:
+it accepts aggregation policies and 90-day Time Travel, both Enterprise-gated.
+Section 10's documented fallback is taken, so Tab 05 ships an aggregation policy
+with `MIN_GROUP_SIZE => 50`, relabelled as a **minimum-cohort guarantee**, and
+that tab demonstrates the differencing attack the substitution leaves open
+rather than hiding it.
+
+**Every AI function.** `AI_EMBED`, `AI_FILTER` and all `SNOWFLAKE.CORTEX.*`
+return *"not available for trial accounts"*. So embeddings are generated offline
+with the same model the design names, `snowflake-arctic-embed-m`, and loaded
+into a real `VECTOR(FLOAT, 768)` column. **The similarity search did not move**:
+every comparison still runs in Snowflake through `VECTOR_COSINE_SIMILARITY` with
+the mandatory pre-filter. The `AI_FILTER` confirmation step becomes two SQL
+predicates, and `confirmation_method` is carried on every row.
+
+The intended statements are preserved, commented, in `sql/06_embeddings.sql`,
+`sql/07_clone_detection.sql` and `sql/11_privacy_policy.sql`, so the difference
+between what was designed and what shipped is inspectable rather than described.
 
 ### What this cannot do
 
+- **The privacy layer is a minimum-cohort floor, not differential privacy.** It
+  refuses to answer about fewer than fifty beneficiaries, but it adds no noise
+  and has no budget, so two permitted large queries can be subtracted to learn
+  about a handful of people.
 - **It cannot prove intent.** A high similarity score is a reason to look
   closer, never a verdict about a person.
 - **It cannot detect an imitator whose name shares no meaning with its target.**

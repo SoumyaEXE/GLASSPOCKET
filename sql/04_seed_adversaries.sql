@@ -22,117 +22,57 @@ USE WAREHOUSE GP_WH;
 USE DATABASE GLASSPOCKET;
 
 -- ---------------------------------------------------------------------
--- Landing tables for the generator output.
+-- Landing tables for the prepared export.
+--
+--   python tools/export_for_snowflake.py
+--   PUT file://data/warehouse/*.csv @RAW.GP_STAGE/warehouse/;
+--
+-- The seeded organisations already arrived with the corpus in file 02,
+-- carrying is_synthetic and batch_id, so this file loads the delivery
+-- events and the beneficiary records and then enforces the contract over
+-- all of it.
 -- ---------------------------------------------------------------------
-CREATE OR REPLACE TABLE RAW.SYNTH_ORGS (
-  org_id STRING, ein STRING, name STRING, blurb STRING,
-  city STRING, state STRING, ntee_code STRING, cause STRING,
-  lat FLOAT, lon FLOAT, max_hops INT,
-  synth_technique STRING, synth_target_id STRING
-);
-
-CREATE OR REPLACE TABLE RAW.SYNTH_DISBURSEMENTS (
+CREATE OR REPLACE TABLE RAW.DISBURSEMENTS_PREPARED (
   disbursement_id STRING, org_id STRING, programme_code STRING,
   beneficiary_id STRING, amount_usd FLOAT, pledged_usd FLOAT,
-  district STRING, lat FLOAT, lon FLOAT,
-  dispatched_at STRING, delivered_at STRING, status STRING
+  district STRING, lat FLOAT, lon FLOAT, delivery_h3 STRING,
+  dispatched_at STRING, delivered_at STRING, status STRING,
+  is_synthetic BOOLEAN, batch_id STRING
 );
 
-CREATE OR REPLACE TABLE RAW.SYNTH_BENEFICIARIES (
-  beneficiary_id STRING, district STRING, programme_code STRING,
-  cause STRING, cohort_band STRING
-);
+COPY INTO RAW.DISBURSEMENTS_PREPARED
+  FROM @RAW.GP_STAGE/warehouse/disbursements.csv
+  FILE_FORMAT = (FORMAT_NAME = RAW.FF_PREPARED)
+  ON_ERROR = ABORT_STATEMENT;
 
-CREATE OR REPLACE FILE FORMAT RAW.FF_SYNTH_CSV
-  TYPE = CSV SKIP_HEADER = 1 FIELD_OPTIONALLY_ENCLOSED_BY = '"'
-  EMPTY_FIELD_AS_NULL = TRUE NULL_IF = ('', 'NULL');
-
-COPY INTO RAW.SYNTH_ORGS
-  FROM @RAW.GP_STAGE/synthetic/synth_orgs.csv
-  FILE_FORMAT = (FORMAT_NAME = RAW.FF_SYNTH_CSV);
-
-COPY INTO RAW.SYNTH_DISBURSEMENTS
-  FROM @RAW.GP_STAGE/synthetic/synth_disbursements.csv
-  FILE_FORMAT = (FORMAT_NAME = RAW.FF_SYNTH_CSV);
-
-COPY INTO RAW.SYNTH_BENEFICIARIES
-  FROM @RAW.GP_STAGE/synthetic/synth_beneficiaries.csv
-  FILE_FORMAT = (FORMAT_NAME = RAW.FF_SYNTH_CSV);
-
--- ---------------------------------------------------------------------
--- Impersonators into STAGING.ORGS.
---
--- is_verified is FALSE by construction and is_synthetic is TRUE by
--- construction. Both are asserted at the foot of this file. The
--- generator records which of the five documented techniques produced
--- each row, which is what Tab 02 reports in its technique breakdown.
--- ---------------------------------------------------------------------
-INSERT INTO STAGING.ORGS (
-  org_id, ein, name, blurb, city, state, ntee_code, cause,
-  lat, lon, home_h3, region_h3, max_hops,
-  is_verified, is_synthetic, batch_id, first_seen,
-  synth_technique, synth_target_id
-)
-SELECT
-  s.org_id,
-  s.ein,
-  s.name,
-  s.blurb,
-  s.city,
-  s.state,
-  s.ntee_code,
-  s.cause,
-  s.lat,
-  s.lon,
-  H3_LATLNG_TO_CELL_STRING(s.lat, s.lon, 5) AS home_h3,
-  H3_LATLNG_TO_CELL_STRING(s.lat, s.lon, 3) AS region_h3,
-  s.max_hops,
-  FALSE                                     AS is_verified,
-  TRUE                                      AS is_synthetic,
-  'SYNTH_ADVERSARY_V1'                      AS batch_id,
-  CURRENT_TIMESTAMP()                       AS first_seen,
-  s.synth_technique,
-  s.synth_target_id
-FROM RAW.SYNTH_ORGS s;
-
--- ---------------------------------------------------------------------
--- Disbursement events. Real geography from IATI, synthetic movement.
--- Attrition is tuned so the aggregate delivery share sits close to the
--- published WFP ratio of 371 collected from 590 moved. Stated on Tab 04
--- section S6 and again on Tab 10. The individual events are not real and
--- the interface never implies they are.
--- ---------------------------------------------------------------------
 INSERT INTO STAGING.DISBURSEMENTS (
   disbursement_id, org_id, programme_code, beneficiary_id,
   amount_usd, pledged_usd, district, lat, lon, delivery_h3,
-  dispatched_at, delivered_at, status, is_synthetic, batch_id
-)
+  dispatched_at, delivered_at, status, is_synthetic, batch_id)
 SELECT
-  d.disbursement_id,
-  d.org_id,
-  d.programme_code,
-  d.beneficiary_id,
-  d.amount_usd,
-  d.pledged_usd,
-  d.district,
-  d.lat,
-  d.lon,
-  H3_LATLNG_TO_CELL_STRING(d.lat, d.lon, 7)  AS delivery_h3,
-  TRY_TO_TIMESTAMP_NTZ(d.dispatched_at)      AS dispatched_at,
-  TRY_TO_TIMESTAMP_NTZ(d.delivered_at)       AS delivered_at,
-  d.status,
-  TRUE                                       AS is_synthetic,
-  'SYNTH_ADVERSARY_V1'                       AS batch_id
-FROM RAW.SYNTH_DISBURSEMENTS d;
+  disbursement_id, org_id, programme_code, beneficiary_id,
+  amount_usd, pledged_usd, district, lat, lon, delivery_h3,
+  TRY_TO_TIMESTAMP_NTZ(dispatched_at),
+  TRY_TO_TIMESTAMP_NTZ(delivered_at),
+  status, is_synthetic, batch_id
+FROM RAW.DISBURSEMENTS_PREPARED;
 
-INSERT INTO STAGING.BENEFICIARIES (
-  beneficiary_id, district, programme_code, cause, cohort_band,
-  is_synthetic, batch_id
-)
-SELECT
-  b.beneficiary_id, b.district, b.programme_code, b.cause, b.cohort_band,
-  TRUE, 'SYNTH_ADVERSARY_V1'
-FROM RAW.SYNTH_BENEFICIARIES b;
+CREATE OR REPLACE TABLE RAW.BENEFICIARIES_PREPARED (
+  beneficiary_id STRING, district STRING, programme_code STRING,
+  cause STRING, cohort_band STRING, is_synthetic BOOLEAN, batch_id STRING
+);
+
+COPY INTO RAW.BENEFICIARIES_PREPARED
+  FROM @RAW.GP_STAGE/warehouse/beneficiaries.csv
+  FILE_FORMAT = (FORMAT_NAME = RAW.FF_PREPARED)
+  ON_ERROR = ABORT_STATEMENT;
+
+INSERT INTO STAGING.BENEFICIARIES
+  (beneficiary_id, district, programme_code, cause, cohort_band,
+   is_synthetic, batch_id)
+SELECT beneficiary_id, district, programme_code, cause, cohort_band,
+       is_synthetic, batch_id
+FROM RAW.BENEFICIARIES_PREPARED;
 
 -- =====================================================================
 -- The seven cited figures, Section 01.

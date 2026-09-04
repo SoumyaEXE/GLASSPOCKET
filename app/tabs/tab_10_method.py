@@ -47,11 +47,26 @@ REAL_VERSUS_SIMPLIFIED = [
      "Genuinely minted and independently verifiable",
      "Solana devnet, not mainnet"),
     ("Privacy guarantee",
-     "A real Snowflake privacy policy with real noise and a real budget",
-     "Epsilon tuned for demonstration legibility rather than production"),
+     "A real Snowflake aggregation policy enforcing a minimum cohort of 50, "
+     "attached to a terminal serving view with an entity key",
+     "A minimum-cohort guarantee, NOT differential privacy. The DP DDL does "
+     "not parse on this deployment. No noise, no query budget."),
+    ("Embeddings",
+     "Genuine snowflake-arctic-embed-m vectors in a VECTOR(FLOAT, 768) "
+     "column; all similarity search runs in Snowflake",
+     "Generated offline, because AI functions are blocked on trial accounts"),
+    ("Clone confirmation",
+     "Nothing",
+     "AI_FILTER is blocked on trial accounts, so confirmation is two SQL "
+     "predicates. Every row carries confirmation_method = HEURISTIC."),
 ]
 
 LIMITATIONS = [
+    "The privacy layer is a minimum-cohort floor, not differential privacy. "
+    "It refuses to answer about fewer than fifty beneficiaries, but it adds "
+    "no noise and has no budget, so two permitted large queries can be "
+    "subtracted to learn about a handful of people. Tab 05 demonstrates that "
+    "attack rather than hiding it.",
     "It cannot prove intent. A high similarity score is a reason to look "
     "closer, never a verdict about a person.",
     "It cannot detect an imitator whose name shares no meaning with its "
@@ -65,9 +80,10 @@ LIMITATIONS = [
 ]
 
 FEATURES = [
-    ("Privacy policy, differential privacy", "Tab 05, The Wall", "new to me"),
-    ("AI_EMBED and VECTOR_COSINE_SIMILARITY", "Tabs 01 and 02", "new to me"),
-    ("AI_FILTER as a semantic predicate", "Tab 01, confirmation chip", "new to me"),
+    ("Aggregation policy, MIN_GROUP_SIZE", "Tab 05, The Wall", "new to me"),
+    ("VECTOR column and VECTOR_COSINE_SIMILARITY", "Tabs 01 and 02", "new to me"),
+    ("Differential privacy policy", "attempted, unavailable here", "not shipped"),
+    ("AI_EMBED / AI_FILTER", "attempted, blocked on trial", "not shipped"),
     ("H3 grid functions and ST_DISTANCE", "Tabs 03 and 04", "used before"),
     ("SQL UDF, decomposable score", "Tab 01, waterfall", "used before"),
     ("Dynamic Tables with TARGET_LAG", "Tab 00, pipeline strip", "used before"),
@@ -82,12 +98,12 @@ SQL_FILES = [
     ("03_load_iati.sql", "IATI activity and location data"),
     ("04_seed_adversaries.sql", "synthetic clones, labelled, plus the citations"),
     ("05_staging_dynamic_tables.sql", "six Dynamic Tables at 60 second lag"),
-    ("06_embeddings.sql", "AI_EMBED batch, run once"),
-    ("07_clone_detection.sql", "vector similarity and the evasion gap"),
+    ("06_embeddings.sql", "offline arctic-embed vectors into a VECTOR column"),
+    ("07_clone_detection.sql", "vector similarity, evasion gap, confirmation"),
     ("08_geospatial_h3.sql", "H3 geometry and hex risk"),
     ("09_risk_score_udf.sql", "the decomposable score"),
     ("10_semantic_view.sql", "semantic layer"),
-    ("11_privacy_policy.sql", "differential privacy, run first in practice"),
+    ("11_privacy_policy.sql", "minimum-cohort aggregation policy, build first"),
     ("12_serving_views.sql", "terminal serving views"),
     ("13_oracle_queue.sql", "mint queue and mint log"),
     ("99_acceptance_checks.sql", "the gate"),
@@ -127,7 +143,7 @@ def render() -> None:
             "SOLANA_DEVNET": "solana devnet, via the bridge",
         }).fillna("unclassified")
         st.dataframe(
-            table[["table_name", "batch_id", "rows", "source"]],
+            table[["table_name", "batch_id", "row_count", "source"]],
             use_container_width=True, hide_index=True,
         )
     corpus = data.run("Q_CORPUS_NOTE")
@@ -158,6 +174,41 @@ def render() -> None:
         pd.DataFrame(REAL_VERSUS_SIMPLIFIED,
                      columns=["element", "real", "seeded or simplified"]),
         use_container_width=True, hide_index=True,
+    )
+
+    # ------------------------------------------------------- S3b
+    C.section("What the platform would not give us")
+    st.markdown(
+        """
+Two features this build was designed around are unavailable on the account
+it runs on, and both were discovered by running the statement rather than by
+reading documentation.
+
+**Differential privacy.** `CREATE PRIVACY BUDGET` and
+`ALTER VIEW ... SET PRIVACY POLICY` do not parse on this deployment. The
+keywords are unknown, so it is not a permissions problem and no grant fixes
+it. The account *is* Enterprise Edition: it accepts aggregation policies and
+ninety-day Time Travel, both of which are Enterprise-gated. Tab 05 therefore
+ships against an aggregation policy with a minimum group size of fifty,
+relabelled as a minimum-cohort guarantee, and that tab demonstrates the
+differencing attack the substitution leaves open.
+
+**Every AI function.** `AI_EMBED`, `AI_FILTER` and all
+`SNOWFLAKE.CORTEX.*` functions return *"not available for trial accounts"*.
+So the embeddings are generated offline with the same model the design calls
+for, `snowflake-arctic-embed-m`, and loaded into a real `VECTOR(FLOAT, 768)`
+column. The similarity search itself did not move: every comparison still
+runs in Snowflake through `VECTOR_COSINE_SIMILARITY` with the mandatory
+pre-filter. The `AI_FILTER` confirmation step is replaced by two SQL
+predicates, and every confirmed row carries
+`confirmation_method = 'HEURISTIC'` so the substitution is visible in the
+data rather than only in this paragraph.
+
+The intended statements are preserved, commented, in `sql/06_embeddings.sql`,
+`sql/07_clone_detection.sql` and `sql/11_privacy_policy.sql`, so the
+difference between what was designed and what shipped is inspectable rather
+than described. The full probe is in `docs/platform_constraints.md`.
+        """
     )
 
     # ---------------------------------------------------------------- S4

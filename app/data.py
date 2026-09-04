@@ -9,9 +9,17 @@ defect (Build Spec Section 04B).
 PREVIEW MODE exists so the interface can be built, reviewed and rehearsed
 without a warehouse attached. It reads the DuckDB store written by
 tools/make_synthetic.py. Every figure it serves is derived from the same
-generator that feeds the warehouse, but the differential privacy on Tab 05
-is a local Laplace mechanism rather than a Snowflake privacy policy, and
-the receipts are local rows rather than devnet mints.
+generator that feeds the warehouse, but the cohort floor on Tab 05 is
+enforced in Python rather than by a Snowflake aggregation policy, and the
+receipts are local rows rather than devnet mints.
+
+THE GUARANTEE ON TAB 05 IS A MINIMUM COHORT FLOOR, NOT DIFFERENTIAL
+PRIVACY. The differential privacy DDL does not parse on the target
+deployment, so the build takes the fallback Section 10 specifies: an
+aggregation policy with MIN_GROUP_SIZE. What that does and does not
+guarantee is spelled out in sql/11_privacy_policy.sql and on the tab
+itself. The Laplace machinery below is retained only for the noise-curve
+illustration, which is labelled as an illustration.
 
 The interface states which mode it is in, on every tab, in the header. A
 project about honest disclosure does not get to be vague about that.
@@ -129,77 +137,69 @@ def scalar(query_name: str, column: str, params: tuple | None = None,
 
 
 # ===========================================================================
-# Tab 05 / the privacy layer
+# Tab 05 / the cohort floor
 # ===========================================================================
 #
-# In warehouse mode Snowflake does this. A privacy policy is attached to
-# SERVING.V_BENEFICIARY_OUTCOMES with an entity key on beneficiary_id, the
-# noise is calibrated by the privacy domains, and the budget is a real
-# Snowflake privacy budget that genuinely depletes.
+# THE SHIPPED GUARANTEE IS K-ANONYMITY, NOT DIFFERENTIAL PRIVACY.
 #
-# In preview mode the class below implements the same guarantee in Python:
-# a Laplace mechanism with a per-query epsilon and a budget ledger that
-# does not refill. It is a real differential privacy implementation, not a
-# mock, but it is NOT the Snowflake feature, and Tab 05 says so on screen
-# whenever it is the one answering.
+# In warehouse mode Snowflake does this. An aggregation policy with
+# MIN_GROUP_SIZE => 50 is attached to SERVING.V_BENEFICIARY_OUTCOMES with
+# an entity key on beneficiary_id. Snowflake refuses any aggregate whose
+# group falls below the floor, and it refuses it for GP_ANALYST however
+# the query is phrased.
+#
+# In preview mode the same rule is applied here in Python, so both
+# backends behave identically.
+#
+# What this does NOT do, and what the tab says plainly: it adds no noise,
+# it has no budget, and it does not stop a differencing attack built from
+# several large overlapping queries. Differential privacy is what defends
+# against that, and the target deployment does not offer it. See
+# docs/platform_constraints.md.
 
 
 @dataclass
 class PrivacyLedger:
-    """Per-query epsilon accounting for the preview mechanism."""
+    """Query accounting for the preview mechanism.
 
-    epsilon_allocated: float = 1.0
-    epsilon_per_query: float = 0.1
+    Retained because Tab 05 still reports how many questions have been
+    asked and how many were refused. It is NOT a differential privacy
+    budget: the shipped guarantee has no budget, which is one of the
+    things the tab says out loud.
+    """
+
     spend: list[dict] = field(default_factory=list)
 
-    @property
-    def consumed(self) -> float:
-        return sum(entry["epsilon_spent"] for entry in self.spend)
 
-    @property
-    def remaining(self) -> float:
-        return max(0.0, self.epsilon_allocated - self.consumed)
+    def record(self, *, refused: bool, cohort: int) -> None:
+        """Log one question and whether the policy refused it.
 
-    @property
-    def share_remaining(self) -> float:
-        return self.remaining / self.epsilon_allocated if self.epsilon_allocated else 0.0
-
-    @property
-    def exhausted(self) -> bool:
-        return self.remaining <= 1e-9
-
-    def charge(self, *, narrow: bool) -> float:
-        """A narrow query costs more.
-
-        Sensitivity is higher when a filter isolates few entities, so the
-        same accuracy target buys less. This is why repeatedly narrowing
-        drains the budget rather than sharpening the answer.
+        There is no budget to draw down under a minimum-cohort guarantee,
+        so this is a query log rather than an accounting ledger. Tab 05
+        says as much: a floor that never depletes is exactly what leaves
+        the differencing attack open.
         """
-        cost = self.epsilon_per_query * (3.0 if narrow else 1.0)
-        cost = min(cost, self.remaining)
         self.spend.append({
             "query_n": len(self.spend) + 1,
-            "epsilon_spent": cost,
-            "is_narrow": narrow,
+            "cohort": int(cohort),
+            "refused": bool(refused),
         })
-        return cost
+
+    @property
+    def asked(self) -> int:
+        return len(self.spend)
+
+    @property
+    def refused(self) -> int:
+        return sum(1 for e in self.spend if e["refused"])
 
     def reset(self) -> None:
         self.spend.clear()
 
-    def burndown(self) -> pd.DataFrame:
+    def log(self) -> pd.DataFrame:
         if not self.spend:
-            return pd.DataFrame(columns=["query_n", "epsilon_spent", "is_narrow"])
+            return pd.DataFrame(columns=["query_n", "cohort", "refused"])
         return pd.DataFrame(self.spend)
-
-
-def _laplace(scale: float, size=None, rng=None) -> float | np.ndarray:
-    rng = rng or np.random.default_rng()
-    return rng.laplace(0.0, scale, size)
-
-
-#: Privacy domain on amount_usd, matching the ALTER VIEW in sql/11.
-AMOUNT_DOMAIN = (0.0, 5000.0)
 
 
 def true_answer(filters: dict) -> dict:
@@ -232,30 +232,27 @@ def true_answer(filters: dict) -> dict:
     }
 
 
-def released_answer(filters: dict, ledger: PrivacyLedger,
+def released_answer(filters: dict, ledger: "PrivacyLedger",
                     rng=None) -> dict:
     """The answer that is actually released.
 
-    Warehouse mode: Snowflake applies the policy and returns the noised
-    aggregate. The budget depletes inside Snowflake.
+    Warehouse mode: the query runs as GP_ANALYST against the view the
+    aggregation policy is attached to. If the group falls below the floor
+    Snowflake raises, and that refusal IS the guarantee working. It is
+    reported as a refusal rather than quietly replaced with something
+    friendlier.
 
-    Preview mode: a Laplace mechanism at the ledger's per-query epsilon,
-    with sensitivity taken from the privacy domain on amount_usd. Once the
-    budget is exhausted the query is refused rather than answered badly,
-    which is the honest failure mode.
+    Preview mode: the same floor, applied here, so both backends agree.
+
+    Note what does not happen: nothing is perturbed. Above the floor the
+    released value is exact. That is the honest difference between a
+    minimum-cohort guarantee and a differential privacy one.
     """
     truth = true_answer(filters)
-    narrow = truth["cohort"] < 50
+    floor = cohort_floor()
+    below_floor = truth["cohort"] < floor
 
-    if ledger.exhausted:
-        return {
-            "refused": True,
-            "reason": "privacy budget exhausted for this window",
-            "cohort": None, "total_usd": None, "delivery_rate": None,
-            "epsilon_spent": 0.0,
-        }
-
-    spent = ledger.charge(narrow=narrow)
+    ledger.record(refused=below_floor, cohort=truth["cohort"])
 
     if mode() == WAREHOUSE:
         where, params = _beneficiary_where(filters)
@@ -268,83 +265,154 @@ def released_answer(filters: dict, ledger: PrivacyLedger,
                 "FROM SERVING.V_BENEFICIARY_OUTCOMES " + where,
                 params=params,
             ).to_pandas()
+            df.columns = [c.lower() for c in df.columns]
             row = df.iloc[0]
+
+            # Snowflake does not raise when a group falls below the floor.
+            # It returns NULL for the aggregate, which is the same refusal
+            # wearing different clothes. Treating a NULL as a zero here
+            # would turn a withheld answer into a confident wrong one,
+            # which is the single worst thing this tab could do.
+            if pd.isna(row["cohort"]) or pd.isna(row["total_usd"]):
+                return {
+                    "refused": True,
+                    "reason": (f"the aggregation policy withheld this answer: "
+                               f"the group holds fewer than {floor} beneficiaries"),
+                    "cohort": None, "total_usd": None, "delivery_rate": None,
+                    "floor": floor, "exact": False,
+                }
+
             return {
                 "refused": False,
-                "cohort": float(row["COHORT"] if "COHORT" in row else row["cohort"]),
-                "total_usd": float(row.get("TOTAL_USD", row.get("total_usd", 0)) or 0),
-                "delivery_rate": float(
-                    row.get("DELIVERY_RATE", row.get("delivery_rate", 0)) or 0),
-                "epsilon_spent": spent,
+                "cohort": float(row["cohort"]),
+                "total_usd": float(row["total_usd"] or 0),
+                "delivery_rate": float(row["delivery_rate"] or 0),
+                "floor": floor,
+                "exact": True,
             }
         except Exception as exc:              # noqa: BLE001
             return {
                 "refused": True,
-                "reason": f"the policy refused this query: {exc}",
+                "reason": _refusal_reason(exc, floor),
                 "cohort": None, "total_usd": None, "delivery_rate": None,
-                "epsilon_spent": spent,
+                "floor": floor, "exact": False,
             }
         finally:
             session.sql("USE ROLE ACCOUNTADMIN").collect()
 
-    # Preview mechanism.
-    rng = rng or np.random.default_rng()
-    epsilon = spent if spent > 0 else ledger.epsilon_per_query
-
-    count_scale = 1.0 / epsilon
-    amount_scale = (AMOUNT_DOMAIN[1] - AMOUNT_DOMAIN[0]) / epsilon
+    if below_floor:
+        return {
+            "refused": True,
+            "reason": (f"the aggregation policy refused this query: the group "
+                       f"holds fewer than {floor} beneficiaries"),
+            "cohort": None, "total_usd": None, "delivery_rate": None,
+            "floor": floor, "exact": False,
+        }
 
     return {
         "refused": False,
-        "cohort": max(0.0, truth["cohort"] + float(_laplace(count_scale, rng=rng))),
-        "total_usd": max(0.0, truth["total_usd"] + float(_laplace(amount_scale, rng=rng))),
-        "delivery_rate": float(np.clip(
-            truth["delivery_rate"] + float(_laplace(1.0 / (epsilon * 20), rng=rng)),
-            0, 1)),
-        "epsilon_spent": spent,
+        "cohort": float(truth["cohort"]),
+        "total_usd": float(truth["total_usd"]),
+        "delivery_rate": float(truth["delivery_rate"]),
+        "floor": floor,
+        "exact": True,
     }
 
 
-def repeated_releases(filters: dict, n: int = 40) -> list[float]:
-    """Spread of released answers across repeated identical queries.
+def _refusal_reason(exc: Exception, floor: int) -> str:
+    text = " ".join(str(exc).split())
+    lowered = text.lower()
+    if "aggregation" in lowered or "group" in lowered or "policy" in lowered:
+        return (f"Snowflake refused this query: the group holds fewer than "
+                f"{floor} beneficiaries")
+    return f"Snowflake refused this query: {text[:160]}"
 
-    This is what defeats the averaging objection on Tab 05 section S6. The
-    releases do not converge on the truth, because in a real deployment the
-    budget is spent long before enough samples exist to average.
+
+def cohort_floor() -> int:
+    """The minimum group size the policy enforces, read from the object."""
+    try:
+        return int(scalar("Q_COHORT_FLOOR", "min_group_size", default=50))
+    except Exception:                         # noqa: BLE001
+        return 50
+
+
+def floor_curve(filters: dict) -> pd.DataFrame:
+    """Which cohort sizes get an answer at all.
+
+    This replaces the noise-against-cohort curve the spec specifies for a
+    differential privacy build. There is no noise to plot, so the chart
+    plots what is actually true here: below the floor nothing is
+    released, above it the exact value is.
     """
-    truth = true_answer(filters)
-    epsilon = 0.1 if truth["cohort"] >= 50 else 0.1 / 3.0
-    scale = (AMOUNT_DOMAIN[1] - AMOUNT_DOMAIN[0]) / epsilon
-    rng = np.random.default_rng(7)
-    return [max(0.0, truth["total_usd"] + float(v))
-            for v in _laplace(scale, size=n, rng=rng)]
-
-
-def noise_curve_frame(filters: dict) -> pd.DataFrame:
-    """True against released across cohort sizes, one to ten thousand.
-
-    Lines converge right and diverge violently left. This is the picture of
-    a privacy guarantee.
-    """
+    floor = cohort_floor()
     cohorts = np.unique(np.logspace(0, 4, 44).astype(int))
     per_person = 780.0
-    epsilon = 0.1
-    scale = (AMOUNT_DOMAIN[1] - AMOUNT_DOMAIN[0]) / epsilon
-
     truth = cohorts * per_person
-    rng = np.random.default_rng(11)
-    released = np.maximum(0, truth + _laplace(scale, size=len(cohorts), rng=rng))
-
-    # Floored at one so both axes can be logarithmic. A released value of
-    # zero is indistinguishable from "one dollar" at this scale, and the
-    # shape of the divergence is what the chart is for.
+    released = np.where(cohorts >= floor, truth, np.nan)
     return pd.DataFrame({
         "cohort": cohorts,
-        "true_value": np.maximum(1.0, truth),
-        "released_value": np.maximum(1.0, released),
-        "released_lo": np.maximum(1.0, truth - scale),
-        "released_hi": truth + scale,
+        "true_value": truth,
+        "released_value": released,
+        "answered": cohorts >= floor,
+        "floor": floor,
     })
+
+
+def differencing_demo(filters: dict) -> dict | None:
+    """The attack a cohort floor does not stop.
+
+    Two groups that both clear the floor, one contained in the other, are
+    each answerable. Their difference can be far smaller than the floor.
+    This is the honest limitation of k-anonymity and the reason
+    differential privacy exists, so the tab demonstrates it rather than
+    claiming a guarantee the build does not have.
+    """
+    floor = cohort_floor()
+    base = {k: v for k, v in filters.items() if k != "amount_band"}
+    where, params = _beneficiary_where(base)
+    joiner = " AND " if where else " WHERE "
+
+    def agg(threshold: float) -> dict | None:
+        sql = ("SELECT COUNT(*) AS cohort, SUM(amount_usd) AS total_usd "
+               "FROM {obj} " + where + joiner + "amount_usd >= ?")
+        try:
+            if mode() == WAREHOUSE:
+                _, session = get_backend()
+                df = session.sql(
+                    sql.format(obj="SERVING.V_BENEFICIARY_OUTCOMES_TRUE"),
+                    params=params + [threshold],
+                ).to_pandas()
+            else:
+                df = run_sql_preview(sql.format(obj="beneficiary_facts"),
+                                     tuple(params + [threshold]))
+            df.columns = [c.lower() for c in df.columns]
+            row = df.iloc[0]
+            return {"cohort": int(row["cohort"] or 0),
+                    "total_usd": float(row["total_usd"] or 0)}
+        except Exception:                     # noqa: BLE001
+            return None
+
+    group_a = agg(0.0)
+    if not group_a or group_a["cohort"] < floor * 2:
+        return None
+
+    # Walk the threshold up until the two groups differ by fewer people
+    # than the floor while both still clear it.
+    for threshold in (250.0, 500.0, 750.0, 1000.0, 1500.0):
+        group_b = agg(threshold)
+        if not group_b or group_b["cohort"] < floor:
+            continue
+        gap = group_a["cohort"] - group_b["cohort"]
+        if 0 < gap < floor:
+            return {
+                "floor": floor,
+                "threshold": threshold,
+                "group_a": group_a,
+                "group_b": group_b,
+                "difference_people": gap,
+                "difference_usd": group_a["total_usd"] - group_b["total_usd"],
+            }
+    return None
 
 
 def _beneficiary_where(filters: dict) -> tuple[str, list]:
