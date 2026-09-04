@@ -186,3 +186,82 @@ cost is real and is stated rather than buried: recall falls to 270 of 387, so
 roughly a third of the seeded imitations are missed. The whole curve is
 materialised into `MARTS.THRESHOLD_CALIBRATION` and driven by the Tab 02
 slider, so the trade-off can be moved and watched instead of taken on trust.
+
+
+---
+
+## Constraint 5: devnet SOL, and the bootstrap that blocks the bypass
+
+Every airdrop route from this machine is refused:
+
+```
+public devnet   429 Too Many Requests   "You've either reached..."
+helius devnet   403 Forbidden           "Rate limit exceeded"
+```
+
+Tested at 1, 0.5 and 0.25 SOL, and against freshly generated keypairs. Fresh
+addresses are refused identically, which establishes that **the limit is keyed
+to the IP, not to the address**. No amount of new wallets gets around it, and
+`solana airdrop` would hit exactly the same faucet.
+
+### The proof-of-work faucet is real, and it is not enough on its own
+
+`devnet-pow` is installed and working. It finds a live faucet holding roughly
+**1.4 million devnet SOL**, paying **0.02 SOL per solve at difficulty 3**, with
+no rate limit at all:
+
+```
+Faucet address: 6yvwhesLJeE8...   balance 1446759.57 SOL   reward 0.02   d3
+```
+
+But it cannot start from zero:
+
+```
+devnet-pow mine -d 3 --reward 0.02 --no-infer -t 200000000 -u dev
+  -> Error: airdrop request failed. This can happen when the rate limit is reached.
+```
+
+Claiming a mined reward is an ordinary transaction, so the miner must already be
+able to pay a fee. A wallet with 0 SOL cannot pay a fee, and the airdrop that
+would give it one is rate limited. That is the whole deadlock, and it is why the
+proof-of-work route does not rescue an empty wallet.
+
+**About 0.01 SOL breaks it.** Once the authority can pay a fee, `npm run mine`
+tops it up from the 1.4M SOL faucet with no further limits.
+
+### Getting the toolchain there was most of the work
+
+Recorded because none of it is obvious from the instructions:
+
+* `cargo install devnet-pow` needs a C toolchain. Visual Studio 2022 is present
+  but **without the C++ workload**, so there is no MSVC linker.
+* Under Git Bash the build fails confusingly: `/usr/bin/link` shadows MSVC's
+  `link.exe` and reports `link: extra operand`. Build from PowerShell.
+* The GNU toolchain then fails on the 32-bit MinGW.org `dlltool.exe` that sits
+  on PATH: `Invalid bfd target`.
+* Removing MinGW from PATH gets `dlltool.exe: program not found`; Rust's
+  self-contained directory ships `dlltool` and `ld` but no assembler, so
+  `dlltool` dies with `CreateProcess`.
+* What worked: a standalone mingw-w64 (WinLibs, 274 MB zip, no installer) put
+  ahead of everything on PATH, with MinGW.org removed, building the
+  `stable-x86_64-pc-windows-gnu` toolchain. Roughly eight minutes to compile.
+
+### Two side effects on this machine
+
+`devnet-pow` insists on a Solana CLI config even when `-k` and `-u` are passed,
+so these were created:
+
+* `~/.config/solana/cli/config.yml` pointing at devnet and at the repository's
+  `authority.json`. It must be written **without a BOM** or the YAML parse fails
+  with a misleading "cannot find the file specified".
+* `~/.config/solana/id.json`, a copy of `authority.json`. Nothing was
+  overwritten: neither file existed beforehand.
+
+### The local validator is not an option here, and it is worth saying why
+
+`solana-test-validator` gives unlimited SOL instantly. It would also make Tab 06
+dishonest. The entire argument for putting receipts on a chain is that the
+record "persists whether or not GLASSPOCKET exists, whether or not the operator
+stays honest". A receipt on a validator running on the builder's laptop has none
+of those properties and cannot be checked by a judge. It is a reasonable way to
+exercise the bridge mechanics, and it is not a way to satisfy CHN-01.

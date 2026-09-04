@@ -12,7 +12,9 @@
     "start": "tsx src/index.ts",
     "once": "tsx src/index.ts --once",
     "balance": "tsx src/tree.ts --balance",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "mine": "devnet-pow mine -d 3 --reward 0.02 --no-infer -t 1000000000 -u dev -k ../authority.json",
+    "fund": "node fund_check.mjs"
   },
   "dependencies": {
     "@metaplex-foundation/mpl-bubblegum": "^4.2.1",
