@@ -1628,6 +1628,83 @@ Q_SAMPLE_ASSET = Query(
 # Time Travel as tamper evidence. The mechanic is to update a row, then
 # query the same row as it existed before the update, and show both.
 
+Q_SCORE_RECONCILIATION = Query(
+    sql="""
+        SELECT COUNT(*)                                          AS rows_scored,
+               COUNT_IF(ABS(LEAST(100, comp_semantic + comp_evasion
+                    + comp_geometry + comp_unaccounted + comp_receipts)
+                    - risk_score) > 0.001)                       AS hand_edited,
+               COUNT_IF(is_synthetic)                            AS seeded_rows,
+               COUNT_IF(verdict = 'needs a second look')         AS second_look,
+               COUNT_IF(is_synthetic
+                        AND verdict <> 'needs a second look')    AS seeded_cleared,
+               MAX(scored_at)                                    AS last_scored_at
+        FROM MARTS.ORG_RISK
+    """,
+    local="""
+        SELECT COUNT(*)                                          AS rows_scored,
+               COUNT(*) FILTER (WHERE ABS(LEAST(100, comp_semantic
+                    + comp_evasion + comp_geometry + comp_unaccounted
+                    + comp_receipts) - risk_score) > 0.001)      AS hand_edited,
+               COUNT(*) FILTER (WHERE is_synthetic)              AS seeded_rows,
+               COUNT(*) FILTER (WHERE verdict = 'needs a second look')
+                                                                 AS second_look,
+               COUNT(*) FILTER (WHERE is_synthetic
+                        AND verdict <> 'needs a second look')    AS seeded_cleared,
+               MAX(scored_at)                                    AS last_scored_at
+        FROM org_risk
+    """,
+    note=(
+        "How many rows an operator has changed by hand, counted without "
+        "an audit table. "
+        "MARTS.F_RISK is decomposable: the five component columns sum to "
+        "the score, capped at 100. The demo control on The Historian "
+        "writes risk_score and verdict and leaves the components alone, "
+        "because that is what an UPDATE against one column does. So a row "
+        "whose components no longer reconstruct its own total is a row "
+        "somebody has overwritten, and the warehouse can say which ones "
+        "those are without keeping a log of anything. "
+        "This is not a hypothetical. A demo click during development left "
+        "ORG_982257031, a seeded imitation, reading 43 and 'verified' "
+        "against components summing to 62.5, and acceptance check DAT-02 "
+        "caught it precisely this way."
+    ),
+)
+
+Q_EDITED_ROWS = Query(
+    sql="""
+        SELECT org_id, name, city, state, cause, is_synthetic,
+               risk_score                                        AS stored_score,
+               LEAST(100, comp_semantic + comp_evasion + comp_geometry
+                     + comp_unaccounted + comp_receipts)         AS reconstructed,
+               verdict, scored_at
+        FROM MARTS.ORG_RISK
+        WHERE ABS(LEAST(100, comp_semantic + comp_evasion + comp_geometry
+                  + comp_unaccounted + comp_receipts) - risk_score) > 0.001
+        ORDER BY ABS(LEAST(100, comp_semantic + comp_evasion + comp_geometry
+                     + comp_unaccounted + comp_receipts) - risk_score) DESC
+        LIMIT 25
+    """,
+    local="""
+        SELECT org_id, name, city, state, cause, is_synthetic,
+               risk_score                                        AS stored_score,
+               LEAST(100, comp_semantic + comp_evasion + comp_geometry
+                     + comp_unaccounted + comp_receipts)         AS reconstructed,
+               verdict, scored_at
+        FROM org_risk
+        WHERE ABS(LEAST(100, comp_semantic + comp_evasion + comp_geometry
+                  + comp_unaccounted + comp_receipts) - risk_score) > 0.001
+        ORDER BY ABS(LEAST(100, comp_semantic + comp_evasion + comp_geometry
+                     + comp_unaccounted + comp_receipts) - risk_score) DESC
+        LIMIT 25
+    """,
+    note=(
+        "The rows themselves. Empty is the correct and expected answer on "
+        "a clean corpus, and the tab says so rather than treating an empty "
+        "table as a missing one."
+    ),
+)
+
 Q_RETENTION = Query(
     sql="""
         SELECT RETENTION_TIME AS retention_days

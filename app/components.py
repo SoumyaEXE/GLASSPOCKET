@@ -143,21 +143,35 @@ def stat_band(items: Sequence[tuple[str, str]]) -> None:
     """Row of three to five bordered cards, each a figure plus caption.
 
     No shadows, 1 px borders, equal widths.
+
+    ONE GRID, NOT A ROW OF STREAMLIT COLUMNS.
+
+        ``.gp-stat`` asks for ``height: 100%``, which inside a Streamlit
+        column resolves against auto, because a column's vertical block is
+        only as tall as what it holds. So a band whose third value was
+        "needs a second look" grew that one card by a line and left the
+        other four short, on a ragged baseline, in a component whose whole
+        job is to look like one even row.
+
+        A grid stretches its items to the tallest for free, and the value
+        is pushed to the top of each card so the figures line up even when
+        one caption wraps and the others do not.
+
+        Emitted as one line: a blank line inside a block of HTML ends the
+        block as far as the markdown parser is concerned. See ``table``.
     """
     items = list(items)
     if not items:
         return
-    for col, (value, caption) in zip(st.columns(len(items), gap="small"), items):
-        with col:
-            st.markdown(
-                f"""
-                <div class="gp-stat">
-                  <div class="gp-stat-value">{_esc(value)}</div>
-                  <div class="gp-stat-caption">{_esc(caption)}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+    cards = "".join(
+        '<div class="gp-stat">'
+        f'<div class="gp-stat-value">{_esc(value)}</div>'
+        f'<div class="gp-stat-caption">{_esc(caption)}</div>'
+        "</div>"
+        for value, caption in items
+    )
+    st.markdown(f'<div class="gp-stat-band">{cards}</div>',
+                unsafe_allow_html=True)
 
 
 # ---------------------------------------------------------------------------
@@ -284,26 +298,40 @@ def compare_columns(
 ) -> None:
     """Two-column layout with a divider.
 
-    Used for before against after on The Historian. Each side takes ``label``, ``value`` and optional ``sub``.
+    Used for before against after on The Historian. Each side takes
+    ``label``, ``value`` and optional ``sub``.
+
+    ONE GRID, NOT TWO STREAMLIT COLUMNS.
+
+        ``.gp-compare`` asks for ``height: 100%``, and inside a Streamlit
+        column that resolves against auto, because a column's vertical
+        block is only as tall as what it holds. So whenever the two sides
+        carried captions of different lengths &mdash; "verdict verified"
+        against "verdict needs a second look, AT(OFFSET => -300)" &mdash;
+        the two cards came out different heights and sat on a ragged
+        baseline. A grid stretches its items to the tallest in the row
+        without being asked.
+
+        The markup is emitted as one line on purpose. A blank line inside
+        a block of HTML ends the block as far as the markdown parser is
+        concerned, and everything after it returns as escaped source. See
+        ``table`` for the same trap.
     """
-    lcol, rcol = st.columns(2, gap="medium")
-    for col, side, tone in ((lcol, left, left_tone), (rcol, right, right_tone)):
+    cards = []
+    for side, tone in ((left, left_tone), (right, right_tone)):
         value_class = "gp-compare-value"
         if tone == "noise":
             value_class += " gp-compare-value-noise"
-        with col:
-            sub = side.get("sub", "")
-            sub_html = f'<div class="gp-compare-sub">{_esc(sub)}</div>' if sub else ""
-            st.markdown(
-                f"""
-                <div class="gp-compare gp-compare-{tone}">
-                  <div class="gp-compare-label">{_esc(side.get('label', ''))}</div>
-                  <div class="{value_class}">{_esc(side.get('value', ''))}</div>
-                  {sub_html}
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+        sub = side.get("sub", "")
+        cards.append(
+            f'<div class="gp-compare gp-compare-{tone}">'
+            f'<div class="gp-compare-label">{_esc(side.get("label", ""))}</div>'
+            f'<div class="{value_class}">{_esc(side.get("value", ""))}</div>'
+            + (f'<div class="gp-compare-sub">{_esc(sub)}</div>' if sub else "")
+            + "</div>"
+        )
+    st.markdown(f'<div class="gp-compare-row">{"".join(cards)}</div>',
+                unsafe_allow_html=True)
 
 
 def source_note(text: str, url: str | None = None) -> None:

@@ -195,14 +195,23 @@ header[data-testid="stHeader"] {
 }
 
 /* ------------------------------- stat band ------------------------ */
+/* The band is a grid so every card ends level, and each card is a
+   column so its caption can be pushed to the bottom. Without both, a
+   caption that wraps to two lines lifts its own figure out of line with
+   the four beside it. */
+.gp-stat-band {
+  display: grid; gap: 12px; align-items: stretch;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
 .gp-stat {
   border: 1px solid #E4E7EB; border-radius: 6px; padding: 16px;
   background: #FFFFFF; height: 100%;
+  display: flex; flex-direction: column;
 }
 .gp-stat-value {
   font-size: 24px; font-weight: 700; letter-spacing: -0.03em; color: #08090B;
 }
-.gp-stat-caption {
+.gp-stat-caption { margin-top: auto;
   font-size: 11px; font-weight: 600; letter-spacing: 0.09em;
   text-transform: uppercase; color: #6B7280; margin-top: 6px; line-height: 1.5;
   /* Two lines' worth, always. One card whose caption wraps must not end
@@ -331,9 +340,18 @@ div[data-testid="stTextInput"].gp-copy input,
 }
 
 /* ---------------------- compare columns (true vs private) --------- */
+/* Two cards that have to end level. Grid items stretch to the tallest
+   in their row for free, which is why this is not a pair of Streamlit
+   columns any more. */
+.gp-compare-row {
+  display: grid; gap: 16px; align-items: stretch;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
 .gp-compare {
   border: 1px solid #E4E7EB; border-radius: 6px; padding: 20px; height: 100%;
+  display: flex; flex-direction: column;
 }
+.gp-compare .gp-compare-sub { margin-top: auto; padding-top: 10px; }
 .gp-compare-truth { border-left: 3px solid #16181D; }
 .gp-compare-noise { border-left: 3px solid #F5A623; }
 .gp-compare-label {
@@ -672,9 +690,14 @@ div[data-testid="stSegmentedControl"] button[kind="segmented_controlActive"] {
 }
 
 /* The result callout. One line, full width, stated plainly. */
+/* The margin is not decoration. A verdict follows a comparison row or a
+   chart often enough that without it the callout's top border sits
+   directly on the bottom border of whatever is above it, and the two
+   read as one broken box. */
 .gp-verdict {
   border: 1px solid #E4E7EB; border-left: 3px solid #6B7280;
   border-radius: 6px; padding: 14px 18px; background: #FFFFFF;
+  margin-top: 14px;
 }
 .gp-verdict-right { border-left-color: #17A34A; background: #F7FCF8; }
 .gp-verdict-wrong { border-left-color: #E5484D; background: #FEF8F8; }
