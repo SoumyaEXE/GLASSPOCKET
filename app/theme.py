@@ -121,11 +121,18 @@ header[data-testid="stHeader"] {
 }
 
 .block-container {
-  padding-top: 2.4rem;
-  padding-bottom: 5rem;
+  padding-top: 1.6rem;
+  padding-bottom: 4rem;
   /* Centred column beside the rail. Wide enough for a hex map and a pair
-     of side-by-side charts, narrow enough that body text stays readable. */
-  max-width: 1180px;
+     of side-by-side charts, narrow enough that body text stays readable.
+     Streamlit's own 6rem side padding is removed and replaced with 28px,
+     because with the rail already taking 288px the default leaves a
+     dead margin on both edges wide enough to read as a layout mistake.
+     Prose blocks carry their own max-width instead, which is where the
+     readability limit actually belongs. */
+  max-width: 1360px;
+  padding-left: 28px;
+  padding-right: 28px;
   margin-left: auto;
   margin-right: auto;
 }
@@ -198,6 +205,9 @@ header[data-testid="stHeader"] {
 .gp-stat-caption {
   font-size: 11px; font-weight: 600; letter-spacing: 0.09em;
   text-transform: uppercase; color: #6B7280; margin-top: 6px; line-height: 1.5;
+  /* Two lines' worth, always. One card whose caption wraps must not end
+     up taller than the four beside it. */
+  min-height: 33px;
 }
 
 /* ------------------------------ identifier ------------------------ */
@@ -482,6 +492,79 @@ hr { border: none; border-top: 1px solid #E4E7EB; margin: 32px 0; }
 }
 .gp-meter-fill { height: 100%; background: #F5A623; }
 .gp-meter-fill-blue { background: #29B5E8; }
+
+/* =====================================================================
+   PANELS, DIAGRAMS AND THE STAGE INSPECTOR
+   ===================================================================== */
+
+/* A hand-authored SVG renders inline rather than as a data URI, so it
+   inherits the embedded Geist. See components.svg for why the markup is
+   collapsed to a single line before it gets here. */
+.gp-svg { display: block; width: 100%; line-height: 0; }
+.gp-svg svg { display: block; width: 100%; height: auto; overflow: visible; }
+.gp-visually-hidden {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+/* A bordered surface a chart or a diagram sits inside. Two columns
+   holding different kinds of content still read as one row when both
+   wear the same frame. */
+.gp-panel {
+  border: 1px solid #E4E7EB; border-radius: 8px;
+  padding: 18px 20px 16px 20px; background: #FFFFFF; height: 100%;
+}
+.gp-panel-tight { padding: 16px 18px 8px 18px; }
+.gp-panel-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 12px; margin-bottom: 14px;
+}
+.gp-panel-title {
+  font-size: 13px; font-weight: 650; letter-spacing: -0.01em; color: #08090B;
+}
+.gp-panel-note {
+  font-size: 10px; font-weight: 600; letter-spacing: 0.11em;
+  text-transform: uppercase; color: #9CA3AF; white-space: nowrap;
+}
+
+/* Key/value rows. Used by the stage inspector under the system map. */
+.gp-kv {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 16px; padding: 9px 0; border-bottom: 1px solid #F0F2F4;
+  font-size: 13px; line-height: 1.45;
+}
+.gp-kv:last-child { border-bottom: none; }
+.gp-kv-k { color: #6B7280; }
+.gp-kv-v {
+  color: #08090B; font-weight: 600; text-align: right;
+  font-feature-settings: 'tnum' 1;
+}
+.gp-kv-list { margin-top: 2px; }
+
+/* The prose that explains a stage. Held to a readable measure even
+   though the column it sits in is wide. */
+.gp-note { font-size: 13px; color: #4B5563; line-height: 1.65; max-width: 68ch; }
+.gp-note strong { color: #08090B; font-weight: 650; }
+
+/* The stage selector. Streamlit's segmented control ships with a pill
+   look that does not match anything else here, so it is flattened onto
+   the same 1px-border language as every other surface. */
+div[data-testid="stSegmentedControl"] button {
+  border-radius: 6px !important; border: 1px solid #E4E7EB !important;
+  background: #FFFFFF !important; color: #4B5563 !important;
+  font-size: 12px !important; font-weight: 600 !important;
+  letter-spacing: 0.06em; text-transform: uppercase;
+  padding: 7px 14px !important; box-shadow: none !important;
+}
+div[data-testid="stSegmentedControl"] button[aria-checked="true"],
+div[data-testid="stSegmentedControl"] button[kind="segmented_controlActive"] {
+  background: #EAF7FD !important; border-color: #BEE5F6 !important;
+  color: #0E7FA8 !important;
+}
+
+/* Streamlit stacks 1rem between every element in a column. Inside a
+   panel that reads as a hole, so blocks tagged as compact close it. */
+.gp-compact + div [data-testid="stVerticalBlock"] { gap: 0.4rem; }
 """
 
 

@@ -13,6 +13,7 @@ monospaced typeface appears anywhere in the application.
 
 from __future__ import annotations
 
+import base64
 import html
 from typing import Iterable, Sequence
 
@@ -333,3 +334,58 @@ def org_card(
         """,
         unsafe_allow_html=True,
     )
+
+
+def svg(markup: str, *, alt: str = "") -> None:
+    """Render a hand-authored SVG inline.
+
+    THE NEWLINES ARE THE BUG. Streamlit does not strip SVG tags: a probe
+    of rect, text, line, path, polygon, circle, g, defs and polyline
+    showed every one of them surviving unsafe_allow_html. What it does do
+    is run the string through a markdown parser first, and a markdown
+    parser treats a blank line as the end of an HTML block. Everything
+    after the first blank line is therefore no longer HTML, so it is
+    escaped and printed as source. That is exactly what the system map
+    did: the first row of boxes drew, and the arrows that followed the
+    blank line landed on the page as text.
+
+    Collapsing the document to a single line fixes it at the cause and
+    keeps the SVG inline, which matters because an inline document
+    inherits the page's embedded Geist. A base64 data URI in an <img>
+    also renders, but it is a separate document with no access to the
+    font, so the labels come back in Helvetica.
+    """
+    one_line = " ".join(markup.split())
+    label = f'<span class="gp-visually-hidden">{_esc(alt)}</span>' if alt else ""
+    st.markdown(f'<div class="gp-svg">{one_line}</div>{label}',
+                unsafe_allow_html=True)
+
+
+def panel_head(title: str, note: str = "") -> None:
+    """Title row for a bordered container.
+
+    Pairs with st.container(border=True). Two columns holding different
+    kinds of content only read as one row if both wear the same frame and
+    label it the same way.
+    """
+    note_html = f'<div class="gp-panel-note">{_esc(note)}</div>' if note else ""
+    st.markdown(
+        f'<div class="gp-panel-head">'
+        f'<div class="gp-panel-title">{_esc(title)}</div>{note_html}</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def kv_rows(items: Sequence[tuple[str, str]]) -> None:
+    """Label on the left, value right-aligned. Figures are tabular."""
+    rows = "".join(
+        f'<div class="gp-kv"><span class="gp-kv-k">{_esc(k)}</span>'
+        f'<span class="gp-kv-v">{_esc(v)}</span></div>'
+        for k, v in items
+    )
+    st.markdown(f'<div class="gp-kv-list">{rows}</div>', unsafe_allow_html=True)
+
+
+def note(text: str) -> None:
+    """A paragraph of explanation, held to a readable measure."""
+    st.markdown(f'<div class="gp-note">{text}</div>', unsafe_allow_html=True)

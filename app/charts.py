@@ -687,46 +687,104 @@ def value_history(df) -> go.Figure:
 
 
 def evidence_timeline(df) -> go.Figure:
-    """Cited incidents plotted over time.
+    """Cited incidents on a dated lane chart, one lane per region.
 
-    Marker area scales with magnitude, normalised WITHIN each unit type
-    since dollars and tonnes are not comparable. Colour by region using
-    the categorical palette in order.
+    The first version of this was a bubble field with the y-axis hidden.
+    It looked like a chart and carried almost nothing: no reader could
+    tell what the vertical position meant, what the sizes were relative
+    to, or when anything happened without hovering every marker. A figure
+    on a tab arguing for legible evidence has to survive being read in a
+    screenshot, so:
+
+      * lanes are labelled, and the axis says the label is a region;
+      * the date axis is visible, because when these things happened is
+        half the argument;
+      * every marker carries its own figure in words, so the chart is
+        readable with no pointer anywhere near it;
+      * marker area still scales WITHIN a unit type only. Tonnes and
+        dollars are not comparable and sizing them against each other
+        would be the exact sloppiness this tab objects to.
     """
-    fig = go.Figure()
     regions = list(dict.fromkeys(df["region"]))
+    fig = go.Figure()
+
+    # A rule down each lane. Without it the markers float and the eye has
+    # nothing to read the horizontal position against.
+    for idx in range(len(regions)):
+        fig.add_shape(
+            type="line", xref="paper", x0=0, x1=1,
+            yref="y", y0=idx, y1=idx,
+            line=dict(color="#F0F2F4", width=1), layer="below",
+        )
+
+    annotated = {"BFOREAI_LA_FIRES", "WFP_GAZA_TRUCKS"}
     for idx, region in enumerate(regions):
         sub = df[df["region"] == region]
+        # The two pinned annotations below would collide with their own
+        # marker labels, so those points carry no inline text.
+        text = [
+            "" if cid in annotated else lab
+            for cid, lab in zip(sub["citation_id"], sub["label"])
+        ]
         fig.add_scatter(
-            x=sub["published_on"], y=sub["lane"], mode="markers",
+            x=sub["published_on"], y=sub["lane"], mode="markers+text",
             marker=dict(
                 size=sub["marker_size"],
                 color=CATEGORICAL[idx % len(CATEGORICAL)],
-                opacity=0.85, line=dict(width=1.5, color="#FFFFFF"),
+                opacity=0.9, line=dict(width=1.5, color="#FFFFFF"),
             ),
+            text=text, textposition="middle right",
+            textfont=dict(family=FONT, size=12, color=TEXT),
+            cliponaxis=False,
             name=region,
             customdata=sub[["claim", "figure", "issuing_body"]],
-            hovertemplate="<b>%{customdata[0]}</b><br>%{customdata[2]}<extra></extra>",
+            hovertemplate=(
+                "<b>%{customdata[0]}</b><br>%{customdata[1]}"
+                "<br>%{customdata[2]}<extra></extra>"
+            ),
         )
 
     # Two annotations pinned permanently, per the specification.
     for cid, text, shift in (
-        ("BFOREAI_LA_FIRES", "119 lookalike domains in six days", -40),
-        ("WFP_GAZA_TRUCKS", "590 trucks moved, 371 collected", 40),
+        ("BFOREAI_LA_FIRES", "119 lookalike domains in six days", -46),
+        ("WFP_GAZA_TRUCKS", "590 trucks moved, 371 collected", 46),
     ):
         row = df[df["citation_id"] == cid]
         if len(row):
             row = row.iloc[0]
             fig.add_annotation(
                 x=row["published_on"], y=row["lane"], text=text,
-                showarrow=True, arrowhead=2, arrowcolor=TEXT_MUTED,
+                showarrow=True, arrowhead=2, arrowsize=1, arrowwidth=1,
+                arrowcolor=TEXT_MUTED,
                 font=dict(family=FONT, size=12, color=INK),
-                ay=shift, bgcolor="rgba(255,255,255,0.92)",
+                ay=shift, ax=0, bgcolor="rgba(255,255,255,0.94)",
                 bordercolor=BORDER, borderwidth=1, borderpad=5,
             )
 
-    fig.update_yaxes(visible=False, range=[-0.6, 3.6])
-    return style_fig(fig, height=320, legend=True)
+    # style_fig merges its own xaxis and yaxis dicts into the layout, so
+    # anything set before it is silently overwritten. Style first, then
+    # override.
+    fig = style_fig(fig, height=300)
+
+    # Padding on both ends so the first marker is not glued to the axis
+    # and the last one's label has somewhere to sit.
+    span = df["published_on"].max() - df["published_on"].min()
+    fig.update_xaxes(
+        range=[df["published_on"].min() - span * 0.08,
+               df["published_on"].max() + span * 0.20],
+        showgrid=True, gridcolor="#F0F2F4", tickformat="%b %Y",
+        tickfont=dict(family=FONT, size=12, color=TEXT_MUTED),
+        ticks="outside", ticklen=4, tickcolor=BORDER,
+    )
+    fig.update_yaxes(
+        visible=True, showgrid=False, showline=False, ticks="",
+        tickmode="array",
+        tickvals=list(range(len(regions))), ticktext=regions,
+        tickfont=dict(family=FONT, size=12, color=TEXT),
+        range=[len(regions) - 0.55, -0.55],   # first region at the top
+    )
+    fig.update_layout(margin=dict(l=8, r=8, t=16, b=8))
+    return fig
 
 
 def pipeline_freshness(df) -> go.Figure:
@@ -757,8 +815,12 @@ def pipeline_freshness(df) -> go.Figure:
         annotation_position="top",
         annotation_font=dict(family=FONT, size=12, color=INK),
     )
+    fig = style_fig(fig, height=max(240, 32 * len(df) + 76))
     fig.update_yaxes(autorange="reversed")
-    return style_fig(fig, height=max(220, 34 * len(df) + 60))
+    top = max(lag, float(df["seconds_since_refresh"].max()) if len(df) else lag)
+    fig.update_xaxes(range=[0, top * 1.18], showgrid=True, gridcolor="#F0F2F4")
+    fig.update_layout(margin=dict(l=8, r=8, t=34, b=8))
+    return fig
 
 
 # ---------------------------------------------------------------------------
@@ -825,5 +887,40 @@ def horizontal_bar(labels, values, *, colour=SNOWFLAKE_BLUE, height=280,
         textfont=dict(family=FONT, size=12, color=TEXT),
         hovertemplate=hover,
     )
+    fig = style_fig(fig, height=height)
     fig.update_yaxes(autorange="reversed")
-    return style_fig(fig, height=height)
+    # An outside label on the longest bar needs somewhere to sit, or it
+    # is clipped by the edge of the plotting area.
+    top = max([float(v) for v in values] or [1.0])
+    fig.update_xaxes(range=[0, top * 1.16], showgrid=True, gridcolor="#F0F2F4")
+    return fig
+
+
+def schema_inventory(df) -> go.Figure:
+    """Objects per schema, split by what kind of object each one is.
+
+    A single bar of "14 objects" says less than it looks like it does.
+    Splitting it shows the shape of the build directly: RAW is a handful
+    of plain tables nobody edits, MARTS carries the Dynamic Tables, and
+    SERVING is nothing but views because that is the only schema anything
+    is allowed to read.
+    """
+    plain = (df["objects"].astype(int)
+             - df["dynamic_tables"].astype(int)
+             - df["views"].astype(int)).clip(lower=0)
+    fig = go.Figure()
+    for name, series, colour in (
+        ("tables", plain, NEUTRAL),
+        ("dynamic tables", df["dynamic_tables"].astype(int), SNOWFLAKE_BLUE),
+        ("views", df["views"].astype(int), "#8DD9F5"),
+    ):
+        fig.add_bar(
+            y=df["schema_name"], x=series, orientation="h", name=name,
+            marker=dict(color=colour),
+            hovertemplate="%{y}: %{x} " + name + "<extra></extra>",
+        )
+    fig = style_fig(fig, height=max(240, 34 * len(df) + 76), legend=True)
+    fig.update_layout(barmode="stack", bargap=0.42)
+    fig.update_yaxes(autorange="reversed")
+    fig.update_xaxes(showgrid=True, gridcolor="#F0F2F4", dtick=5)
+    return fig

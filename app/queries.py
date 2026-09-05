@@ -103,6 +103,34 @@ Q_EVIDENCE = Query(
     note="Hand-entered in sql/04. Never computed, so it cannot drift.",
 )
 
+Q_OBJECT_INVENTORY = Query(
+    sql="""
+        SELECT table_schema                              AS schema_name,
+               COUNT(*)                                  AS objects,
+               SUM(IFF(is_dynamic = 'YES', 1, 0))        AS dynamic_tables,
+               SUM(IFF(table_type = 'VIEW', 1, 0))       AS views,
+               COALESCE(SUM(row_count), 0)               AS total_rows
+        FROM GLASSPOCKET.INFORMATION_SCHEMA.TABLES
+        WHERE table_schema IN ('RAW','STAGING','MARTS','SERVING','ORACLE')
+        GROUP BY table_schema
+        LIMIT 10
+    """,
+    local="""
+        SELECT * FROM (VALUES
+            ('RAW',     4, 0, 0, 45400),
+            ('STAGING', 5, 1, 1, 54100),
+            ('MARTS',  14, 5, 2, 21800),
+            ('SERVING',13, 0,13,     0),
+            ('ORACLE',  4, 0, 1,  8545)
+        ) AS t(schema_name, objects, dynamic_tables, views, total_rows)
+    """,
+    note=(
+        "The stage inventory behind the system map. Read live from "
+        "INFORMATION_SCHEMA so the diagram cannot claim an object the "
+        "warehouse does not actually have."
+    ),
+)
+
 
 # ===========================================================================
 # TAB 01 / Give With Confidence
