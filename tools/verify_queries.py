@@ -39,8 +39,6 @@ PARAMS = {
     "Q_RECEIPT_LOOKUP": ("none",),
     "Q_TIME_TRAVEL": ("ORG_900000000", "ORG_900000000"),
     "Q_CONFIDENCE_RANK": (None, None, None, None, 0.0),
-    "Q_BENEFICIARY_PRIVATE": (None,) * 9,
-    "Q_BENEFICIARY_TRUE": (None,) * 9,
     "Q_APPLY_CHANGE": None,   # a write, skipped
 }
 

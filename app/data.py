@@ -127,19 +127,6 @@ def run(query_name: str, params: tuple | None = None) -> pd.DataFrame:
     return normalise(handle.execute(local).df())
 
 
-def run_sql_preview(sql: str, params: tuple | None = None) -> pd.DataFrame:
-    """Escape hatch for the preview store only.
-
-    Used by the Tab 05 privacy simulator and the Tab 07 history simulator,
-    both of which model warehouse behaviour that DuckDB has no equivalent
-    for. Never used in warehouse mode.
-    """
-    backend_mode, handle = get_backend()
-    if backend_mode != PREVIEW:
-        raise RuntimeError("run_sql_preview is preview-only")
-    return normalise(handle.execute(sql, list(params or ())).df())
-
-
 def scalar(query_name: str, column: str, params: tuple | None = None,
            default=None):
     """First value of a column, or a default when the result is empty."""
@@ -148,28 +135,6 @@ def scalar(query_name: str, column: str, params: tuple | None = None,
         return default
     value = df.iloc[0][column]
     return default if pd.isna(value) else value
-
-
-# ===========================================================================
-# Tab 05 / the cohort floor
-# ===========================================================================
-#
-# THE SHIPPED GUARANTEE IS K-ANONYMITY, NOT DIFFERENTIAL PRIVACY.
-#
-# In warehouse mode Snowflake does this. An aggregation policy with
-# MIN_GROUP_SIZE => 50 is attached to SERVING.V_BENEFICIARY_OUTCOMES with
-# an entity key on beneficiary_id. Snowflake refuses any aggregate whose
-# group falls below the floor, and it refuses it for GP_ANALYST however
-# the query is phrased.
-#
-# In preview mode the same rule is applied here in Python, so both
-# backends behave identically.
-#
-# What this does NOT do, and what the tab says plainly: it adds no noise,
-# it has no budget, and it does not stop a differencing attack built from
-# several large overlapping queries. Differential privacy is what defends
-# against that, and the target deployment does not offer it. See
-# docs/platform_constraints.md.
 
 
 # ===========================================================================
