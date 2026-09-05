@@ -3,9 +3,11 @@
     Money does not vanish at the source. It vanishes between the warehouse
     and the person.
 
-Selecting a district here carries the filter into Tab 05, where the same
-district returns under privacy protection. Narrate that handoff in the
-demo: it is the moment the two halves of the argument join.
+This tab used to end by handing a district to The Wall, where the same
+filter returned under an aggregation policy. The Wall has been cut, so
+the handoff and the district selector that drove it are gone with it: a
+control whose only purpose was to set state for a tab that no longer
+exists is a control that does nothing.
 
 TWO THINGS ON THIS TAB WERE WRONG, AND THEY WERE WRONG IN THE SAME WAY.
 
@@ -514,75 +516,6 @@ def _transit() -> None:
 
 
 # ---------------------------------------------------------------------------
-# S7 / the handoff
-# ---------------------------------------------------------------------------
-
-
-def _handoff(districts) -> None:
-    C.section("The handoff")
-    C.note(
-        "This tab shows you where the money stopped. The next one refuses "
-        "to tell you which person it stopped short of. Carry a district "
-        "across and the same filter returns under an aggregation policy, "
-        "which is the moment the two halves of the argument join."
-    )
-
-    names = list(districts["district"]) if "district" in districts else []
-    with C.panel():
-        C.panel_head("Carry a district into The Wall", "marts.delivery_geometry")
-        chosen = st.selectbox(
-            "district",
-            ["none"] + names,
-            key="gp_l_district",
-            label_visibility="collapsed",
-        )
-        if chosen == "none":
-            C.note(
-                "Nothing is carried yet. The Wall opens on the whole "
-                "corpus until a district is chosen here."
-            )
-            return
-
-        st.session_state["gp_focus_district"] = chosen
-        ladder = data.run("Q_DISTRICT_LADDER", (chosen,))
-        if ladder.empty:
-            C.note("No records for that district.")
-            return
-        d = ladder.iloc[0]
-        moved = _f(d["moved_usd"])
-        delivered = _f(d["delivered_usd"])
-        unaccounted = _f(d["unaccounted_usd"])
-
-        st.markdown(C.chip(f"{chosen} carried to The Wall", "chain"),
-                    unsafe_allow_html=True)
-        C.kv_rows([
-            ("deliveries", f"{_i(d['events']):,}"),
-            ("organisations", f"{_i(d['orgs']):,}"),
-            ("pledged", C.usd(_f(d["pledged_usd"]))),
-            ("moved", C.usd(moved)),
-            ("delivered", C.usd(delivered)),
-            ("still in flight", C.usd(_f(d["in_flight_usd"]))),
-            ("unaccounted", C.usd(unaccounted)),
-            ("outside the declared footprint",
-             f"{_i(d['outside_footprint']):,} deliveries"),
-            ("arrived in the hour they left",
-             f"{_i(d['impossible_transit']):,} deliveries"),
-            ("mean transit", f"{_f(d['mean_transit_hours']):.0f} hours"),
-        ])
-        C.readout([
-            (_pct(delivered / moved if moved else 0.0), "delivered"),
-            (_pct(unaccounted / moved if moved else 0.0), "unaccounted"),
-            (f"{_i(d['orgs']):,}", "organisations involved"),
-        ], flag="unaccounted")
-        C.source_note(
-            "Every figure here is an aggregate. No beneficiary column is "
-            "selected by this query, and that is not an oversight: the "
-            "next tab is the one allowed to answer questions about people, "
-            "and it only answers them under a policy."
-        )
-
-
-# ---------------------------------------------------------------------------
 # how it works
 # ---------------------------------------------------------------------------
 
@@ -635,8 +568,6 @@ def render() -> None:
         return
     stages = _ladder(flow.iloc[0])
 
-    districts = data.run("Q_DISTRICT_ATTRITION")
-
     # ---------------------------------------------------------------- S1
     C.hero(
         _pct(stages["delivery_rate"], 1),
@@ -669,9 +600,6 @@ def render() -> None:
 
     # ---------------------------------------------------------------- S6
     _transit()
-
-    # ---------------------------------------------------------------- S7
-    _handoff(districts)
 
     _how_it_works()
 

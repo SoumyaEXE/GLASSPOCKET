@@ -294,8 +294,9 @@ def render() -> None:
          "query."),
         ("The policy still applies",
          "A question asked here runs as the same role, under the same "
-         "aggregation policy, as the one The Wall demonstrates. Plain "
-         "language changes who can ask, never what may be answered."),
+         "aggregation policy, as any other query against these objects. "
+         "Plain language changes who can ask, never what may be "
+         "answered."),
         ("What we did not do",
          "We did not put a language model on the critical path. The "
          "presets run hand-written SQL against the semantic view, so this "

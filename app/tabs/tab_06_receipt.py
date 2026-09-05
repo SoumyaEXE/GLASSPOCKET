@@ -243,8 +243,8 @@ def _migration(kpi) -> None:
             "not four months of neglect: it is the day the bridge first "
             "ran. Minting is a migration against a queue that already "
             "existed, and it stops when the devnet wallet stops, which is "
-            "a funding limit and is stated on the Method tab rather than "
-            "hidden behind a smoother-looking chart."
+            "a funding limit, and it is stated here rather than hidden "
+            "behind a smoother-looking chart."
         )
         C.source_note(
             "The red area is still the finding. A record with no receipt "

@@ -55,33 +55,36 @@ from tabs import (                           # noqa: E402
     tab_02_graph,
     tab_03_money,
     tab_04_last_mile,
-    tab_05_wall,
     tab_06_receipt,
     tab_07_historian,
     tab_08_ask,
     tab_09_dollar,
-    tab_10_method,
 )
 
 #: The narrative spine, in order: (number, name, one-line move, module).
-#: Section 09: tabs 05, 01 and 06 are the submission. Everything else is
-#: amplification. If the schedule slips, protect those three.
+#: Section 09 named 05, 01 and 06 as the submission. The Wall has since
+#: been cut along with Method And Honesty, so 01 and 06 carry it: the
+#: detector that tells real from imitation, and the receipt that lets you
+#: check the claim without trusting this application.
+#:
+#: The numbers are the position in the argument, not a stable identifier.
+#: They renumber when a tab is added or removed, because a rail that
+#: reads 00, 01, 02, 03, 04, 06, 07, 08, 09 invites the reader to hunt
+#: for a 05 that is not coming back.
 TABS = [
     ("00", "The Brief",            "the stakes, with sources",      tab_00_brief),
     ("01", "Give With Confidence", "telling real from imitation",   tab_01_confidence),
     ("02", "The Trust Graph",      "imitation as a structure",      tab_02_graph),
     ("03", "Follow The Money",     "where aid actually landed",     tab_03_money),
     ("04", "The Last Mile",        "where the gap opens",           tab_04_last_mile),
-    ("05", "The Wall",             "attack the privacy layer",      tab_05_wall),
-    ("06", "The Receipt",          "verify without trusting us",    tab_06_receipt),
-    ("07", "The Historian",        "the record cannot be rewritten", tab_07_historian),
-    ("08", "Ask The Warehouse",    "questions in plain language",   tab_08_ask),
-    ("09", "Where A Dollar Lands", "who to give to",                tab_09_dollar),
-    ("10", "Method And Honesty",   "what is real, what is seeded",  tab_10_method),
+    ("05", "The Receipt",          "verify without trusting us",    tab_06_receipt),
+    ("06", "The Historian",        "the record cannot be rewritten", tab_07_historian),
+    ("07", "Ask The Warehouse",    "questions in plain language",   tab_08_ask),
+    ("08", "Where A Dollar Lands", "who to give to",                tab_09_dollar),
 ]
 
 def _sidebar() -> int:
-    """The left rail: identity, the eleven moves, and live state.
+    """The left rail: identity, the nine moves, and live state.
 
     Returns the index of the selected move.
     """
@@ -134,7 +137,7 @@ def _sidebar() -> int:
             '<div class="gp-rail-foot">'
             "Real organisation data from public filings. Impersonators and "
             "beneficiary records are seeded and labelled, and every one of "
-            "them says so on screen. See Method And Honesty."
+            "them says so on screen. The Brief sets out which is which."
             "</div>",
             unsafe_allow_html=True,
         )

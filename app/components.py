@@ -81,15 +81,21 @@ def shell_header(*, cluster: str = "solana devnet") -> None:
 
 
 def disclosure_banner() -> None:
-    """The persistent banner. Required on all eleven tabs, Section 11.
+    """The persistent banner. Required on every tab, Section 11.
 
-    Copy is verbatim from the Section 12 copy deck.
+    Copy follows the Section 12 copy deck, with one change forced by the
+    removal of Method And Honesty: it pointed at that tab, and a
+    disclosure that names a page which does not exist is worse than no
+    disclosure, because it reads as though the detail is available
+    somewhere. The real-versus-seeded table now sits on The Brief and the
+    banner says so.
     """
     st.markdown(
         """
         <div class="gp-banner">
           Real organisation data from public filings. Impersonators and
-          beneficiary records are seeded and labelled. See the Method tab.
+          beneficiary records are seeded and labelled. The Brief sets out
+          exactly which is which.
         </div>
         """,
         unsafe_allow_html=True,
@@ -316,17 +322,22 @@ def source_note(text: str, url: str | None = None) -> None:
 
 
 def provenance_footer(text: str) -> None:
-    """Muted line naming the data behind this tab, with a pointer to Tab 10."""
+    """Muted line naming the data behind this tab.
+
+    It used to end "See Method and Honesty", which is a page this build
+    no longer has. The sentence that carried the weight is the one about
+    the numbered SQL files, and that is still true, so it stays.
+    """
     st.markdown(
         f'<div class="gp-provenance">{_esc(text)} '
-        f'Every figure on this tab is reproducible from the numbered SQL files. '
-        f'See Method and Honesty.</div>',
+        f'Every figure on this tab is reproducible from the numbered SQL '
+        f'files in sql/.</div>',
         unsafe_allow_html=True,
     )
 
 
 def meter(share: float, *, blue: bool = False) -> None:
-    """Thin horizontal meter. Used for the privacy budget on Tab 05."""
+    """Thin horizontal meter."""
     share = max(0.0, min(1.0, float(share or 0)))
     fill = "gp-meter-fill gp-meter-fill-blue" if blue else "gp-meter-fill"
     st.markdown(
