@@ -424,6 +424,7 @@ Q_ORG_TRUST_CONTEXT = Query(
         LEFT JOIN MARTS.DT_ORG_ACTIVITY      a ON a.org_id = r.org_id
         LEFT JOIN MARTS.DT_RECEIPT_COVERAGE  c ON c.org_id = r.org_id
         WHERE r.org_id = ?
+        LIMIT 1
     """,
     local="""
         SELECT a.disbursements, a.districts, a.pledged_usd, a.moved_usd,
@@ -435,11 +436,16 @@ Q_ORG_TRUST_CONTEXT = Query(
         LEFT JOIN org_activity     a ON a.org_id = r.org_id
         LEFT JOIN receipt_coverage c ON c.org_id = r.org_id
         WHERE r.org_id = ?
+        LIMIT 1
     """,
     note=(
         "What the score was computed from. A score with no evidence behind "
         "it is the thing this project is against, so the lookup shows the "
-        "money and the receipts alongside the number."
+        "money and the receipts alongside the number. LIMIT 1 because "
+        "MARTS.ORG_RISK is one row per organisation and the filter is on "
+        "its key: the limit is a guard on that invariant rather than a "
+        "truncation, and the acceptance check (CRF-09) is right to insist "
+        "on it whether or not the invariant happens to hold today."
     ),
 )
 
@@ -1068,44 +1074,319 @@ Q_ATTRITION_FLOW = Query(
 Q_TRANSIT_FEASIBILITY = Query(
     sql="""
         SELECT disbursement_id, district, km_from_base, transit_hours,
-               amount_usd, geometry_verdict, implied_kmh, exceeds_plausible_speed
+               amount_usd, geometry_verdict, implied_kmh
         FROM SERVING.V_TRANSIT_FEASIBILITY
+        WHERE transit_hours > 0
         LIMIT 8000
     """,
     local="""
         SELECT disbursement_id, district, km_from_base, transit_hours,
                amount_usd, geometry_verdict,
-               km_from_base / NULLIF(transit_hours, 0) AS implied_kmh,
-               (km_from_base / NULLIF(transit_hours, 0)) > 90 AS exceeds_plausible_speed
+               km_from_base / NULLIF(transit_hours, 0) AS implied_kmh
         FROM delivery_geometry
-        WHERE transit_hours IS NOT NULL AND km_from_base IS NOT NULL
+        WHERE transit_hours > 0 AND km_from_base IS NOT NULL
         LIMIT 8000
     """,
+    note=(
+        "transit_hours > 0, not >= 0. A delivery recorded as arriving in "
+        "the same hour it was dispatched has no implied speed at all, only "
+        "a division by zero, and the view's own DIV0 hands back a silent "
+        "zero for it. Those rows are the finding, so they are counted "
+        "separately by Q_TRANSIT_RULE_AUDIT rather than smuggled into a "
+        "distribution as the slowest deliveries in the corpus."
+    ),
+)
+
+Q_TRANSIT_RULE_AUDIT = Query(
+    sql="""
+        SELECT COUNT(*)                                           AS events,
+               COUNT_IF(transit_hours IS NULL)                    AS no_transit_time,
+               COUNT_IF(transit_hours = 0 AND km_from_base > 400) AS rule_matches,
+               COUNT_IF(transit_hours = 0 AND km_from_base > 400
+                        AND geometry_verdict = 'IMPOSSIBLE_TRANSIT')  AS labelled,
+               COUNT_IF(transit_hours = 0 AND km_from_base > 400
+                        AND geometry_verdict <> 'IMPOSSIBLE_TRANSIT') AS masked,
+               SUM(CASE WHEN transit_hours = 0 AND km_from_base > 400
+                        THEN amount_usd ELSE 0 END)               AS rule_usd,
+               COUNT_IF(transit_hours > 0
+                        AND km_from_base / NULLIF(transit_hours, 0) > 900) AS above_jet,
+               COUNT_IF(transit_hours > 0
+                        AND km_from_base / NULLIF(transit_hours, 0) > 90)  AS above_truck,
+               COUNT_IF(transit_hours > 0)                        AS with_speed,
+               MEDIAN(CASE WHEN transit_hours > 0
+                           THEN km_from_base / transit_hours END) AS median_kmh
+        FROM MARTS.DELIVERY_GEOMETRY
+    """,
+    local="""
+        SELECT COUNT(*)                                              AS events,
+               COUNT(*) FILTER (WHERE transit_hours IS NULL)         AS no_transit_time,
+               COUNT(*) FILTER (WHERE transit_hours = 0 AND km_from_base > 400)
+                                                                    AS rule_matches,
+               COUNT(*) FILTER (WHERE transit_hours = 0 AND km_from_base > 400
+                        AND geometry_verdict = 'IMPOSSIBLE_TRANSIT')  AS labelled,
+               COUNT(*) FILTER (WHERE transit_hours = 0 AND km_from_base > 400
+                        AND geometry_verdict <> 'IMPOSSIBLE_TRANSIT') AS masked,
+               SUM(CASE WHEN transit_hours = 0 AND km_from_base > 400
+                        THEN amount_usd ELSE 0 END)                  AS rule_usd,
+               COUNT(*) FILTER (WHERE transit_hours > 0
+                        AND km_from_base / NULLIF(transit_hours, 0) > 900) AS above_jet,
+               COUNT(*) FILTER (WHERE transit_hours > 0
+                        AND km_from_base / NULLIF(transit_hours, 0) > 90)  AS above_truck,
+               COUNT(*) FILTER (WHERE transit_hours > 0)             AS with_speed,
+               MEDIAN(CASE WHEN transit_hours > 0
+                           THEN km_from_base / transit_hours END)    AS median_kmh
+        FROM delivery_geometry
+    """,
+    note=(
+        "The audit behind the transit section, and the reason that section "
+        "was rewritten. It reports what the shipped rule actually matches "
+        "(transit_hours = 0 on a journey over 400 km), how many of those "
+        "rows carry the IMPOSSIBLE_TRANSIT label, and how many are masked "
+        "by an earlier branch of the same CASE. It also reports how many "
+        "deliveries exceed a road speed of 90 km/h, which is nearly all of "
+        "them and is not a finding: the origin is a United States filing "
+        "address and the destination is another continent."
+    ),
 )
 
 Q_DISTRICT_ATTRITION = Query(
     sql="""
-        SELECT district, events, moved_usd, delivered_usd,
-               attrition_rate, mean_transit_hours
-        FROM SERVING.V_DISTRICT_ATTRITION
-        ORDER BY attrition_rate DESC
-        LIMIT 30
+        SELECT g.district,
+               dim.country,
+               COUNT(*)                                              AS events,
+               SUM(g.pledged_usd)                                    AS pledged_usd,
+               SUM(CASE WHEN g.status IN ('DISPATCHED','DELIVERED','UNACCOUNTED')
+                        THEN g.amount_usd ELSE 0 END)                AS moved_usd,
+               SUM(CASE WHEN g.status = 'DELIVERED'
+                        THEN g.amount_usd ELSE 0 END)                AS delivered_usd,
+               SUM(CASE WHEN g.status = 'DISPATCHED'
+                        THEN g.amount_usd ELSE 0 END)                AS in_flight_usd,
+               SUM(CASE WHEN g.status = 'UNACCOUNTED'
+                        THEN g.amount_usd ELSE 0 END)                AS unaccounted_usd,
+               DIV0(SUM(CASE WHEN g.status = 'DELIVERED'
+                             THEN g.amount_usd ELSE 0 END),
+                    NULLIF(SUM(CASE WHEN g.status IN ('DISPATCHED','DELIVERED','UNACCOUNTED')
+                                    THEN g.amount_usd ELSE 0 END), 0))
+                                                                     AS delivery_rate,
+               DIV0(SUM(CASE WHEN g.status = 'UNACCOUNTED'
+                             THEN g.amount_usd ELSE 0 END),
+                    NULLIF(SUM(CASE WHEN g.status IN ('DISPATCHED','DELIVERED','UNACCOUNTED')
+                                    THEN g.amount_usd ELSE 0 END), 0))
+                                                                     AS unaccounted_rate,
+               AVG(g.transit_hours)                                  AS mean_transit_hours,
+               COUNT_IF(g.geometry_verdict <> 'PLAUSIBLE')           AS flagged_events
+        FROM MARTS.DELIVERY_GEOMETRY g
+        LEFT JOIN MARTS.DISTRICT_DIM dim ON dim.district = g.district
+        WHERE g.district IS NOT NULL
+        GROUP BY g.district, dim.country
+        ORDER BY unaccounted_rate DESC
+        LIMIT 40
     """,
     local="""
-        SELECT district,
-               COUNT(*)        AS events,
-               SUM(amount_usd) AS moved_usd,
-               SUM(CASE WHEN status = 'DELIVERED' THEN amount_usd ELSE 0 END) AS delivered_usd,
-               SUM(CASE WHEN status <> 'DELIVERED' THEN amount_usd ELSE 0 END)
-                 / NULLIF(SUM(amount_usd), 0) AS attrition_rate,
-               AVG(DATE_DIFF('hour', dispatched_at, delivered_at)) AS mean_transit_hours
-        FROM staging_disbursements
-        WHERE district IS NOT NULL
-        GROUP BY district
-        ORDER BY attrition_rate DESC
-        LIMIT 30
+        SELECT g.district,
+               ANY_VALUE(d.country)                                  AS country,
+               COUNT(*)                                              AS events,
+               SUM(g.pledged_usd)                                    AS pledged_usd,
+               SUM(CASE WHEN g.status IN ('DISPATCHED','DELIVERED','UNACCOUNTED')
+                        THEN g.amount_usd ELSE 0 END)                AS moved_usd,
+               SUM(CASE WHEN g.status = 'DELIVERED'
+                        THEN g.amount_usd ELSE 0 END)                AS delivered_usd,
+               SUM(CASE WHEN g.status = 'DISPATCHED'
+                        THEN g.amount_usd ELSE 0 END)                AS in_flight_usd,
+               SUM(CASE WHEN g.status = 'UNACCOUNTED'
+                        THEN g.amount_usd ELSE 0 END)                AS unaccounted_usd,
+               SUM(CASE WHEN g.status = 'DELIVERED'
+                        THEN g.amount_usd ELSE 0 END)
+                 / NULLIF(SUM(CASE WHEN g.status IN ('DISPATCHED','DELIVERED','UNACCOUNTED')
+                                   THEN g.amount_usd ELSE 0 END), 0) AS delivery_rate,
+               SUM(CASE WHEN g.status = 'UNACCOUNTED'
+                        THEN g.amount_usd ELSE 0 END)
+                 / NULLIF(SUM(CASE WHEN g.status IN ('DISPATCHED','DELIVERED','UNACCOUNTED')
+                                   THEN g.amount_usd ELSE 0 END), 0) AS unaccounted_rate,
+               AVG(g.transit_hours)                                  AS mean_transit_hours,
+               COUNT(*) FILTER (WHERE g.geometry_verdict <> 'PLAUSIBLE')
+                                                                     AS flagged_events
+        FROM delivery_geometry g
+        JOIN staging_disbursements d USING (disbursement_id)
+        WHERE g.district IS NOT NULL
+        GROUP BY g.district
+        ORDER BY unaccounted_rate DESC
+        LIMIT 40
     """,
-    note="Clicking a bar carries the district into Tab 05.",
+    note=(
+        "REWRITTEN. The shipped version divided everything that was not "
+        "DELIVERED by everything moved and called the result attrition, "
+        "which put money still sitting in a warehouse in the same bucket as "
+        "money nobody can account for. It read 34 to 42 percent per "
+        "district against a real unaccounted share near 12, and it is the "
+        "exact conflation the rest of this application argues against. The "
+        "three statuses come back separately here so the chart can stack "
+        "them and name each one."
+    ),
+)
+
+Q_CORRIDOR_ATTRITION = Query(
+    sql="""
+        SELECT dim.country,
+               COUNT(*)                                              AS events,
+               COUNT(DISTINCT g.district)                            AS districts,
+               COUNT(DISTINCT g.org_id)                              AS orgs,
+               SUM(CASE WHEN g.status IN ('DISPATCHED','DELIVERED','UNACCOUNTED')
+                        THEN g.amount_usd ELSE 0 END)                AS moved_usd,
+               SUM(CASE WHEN g.status = 'DELIVERED'
+                        THEN g.amount_usd ELSE 0 END)                AS delivered_usd,
+               SUM(CASE WHEN g.status = 'DISPATCHED'
+                        THEN g.amount_usd ELSE 0 END)                AS in_flight_usd,
+               SUM(CASE WHEN g.status = 'UNACCOUNTED'
+                        THEN g.amount_usd ELSE 0 END)                AS unaccounted_usd,
+               DIV0(SUM(CASE WHEN g.status = 'DELIVERED'
+                             THEN g.amount_usd ELSE 0 END),
+                    NULLIF(SUM(CASE WHEN g.status IN ('DISPATCHED','DELIVERED','UNACCOUNTED')
+                                    THEN g.amount_usd ELSE 0 END), 0))
+                                                                     AS delivery_rate,
+               DIV0(SUM(CASE WHEN g.status = 'UNACCOUNTED'
+                             THEN g.amount_usd ELSE 0 END),
+                    NULLIF(SUM(CASE WHEN g.status IN ('DISPATCHED','DELIVERED','UNACCOUNTED')
+                                    THEN g.amount_usd ELSE 0 END), 0))
+                                                                     AS unaccounted_rate,
+               AVG(g.transit_hours)                                  AS mean_transit_hours
+        FROM MARTS.DELIVERY_GEOMETRY g
+        JOIN MARTS.DISTRICT_DIM dim ON dim.district = g.district
+        GROUP BY dim.country
+        ORDER BY unaccounted_rate DESC
+        LIMIT 20
+    """,
+    local="""
+        SELECT d.country,
+               COUNT(*)                                              AS events,
+               COUNT(DISTINCT g.district)                            AS districts,
+               COUNT(DISTINCT g.org_id)                              AS orgs,
+               SUM(CASE WHEN g.status IN ('DISPATCHED','DELIVERED','UNACCOUNTED')
+                        THEN g.amount_usd ELSE 0 END)                AS moved_usd,
+               SUM(CASE WHEN g.status = 'DELIVERED'
+                        THEN g.amount_usd ELSE 0 END)                AS delivered_usd,
+               SUM(CASE WHEN g.status = 'DISPATCHED'
+                        THEN g.amount_usd ELSE 0 END)                AS in_flight_usd,
+               SUM(CASE WHEN g.status = 'UNACCOUNTED'
+                        THEN g.amount_usd ELSE 0 END)                AS unaccounted_usd,
+               SUM(CASE WHEN g.status = 'DELIVERED'
+                        THEN g.amount_usd ELSE 0 END)
+                 / NULLIF(SUM(CASE WHEN g.status IN ('DISPATCHED','DELIVERED','UNACCOUNTED')
+                                   THEN g.amount_usd ELSE 0 END), 0) AS delivery_rate,
+               SUM(CASE WHEN g.status = 'UNACCOUNTED'
+                        THEN g.amount_usd ELSE 0 END)
+                 / NULLIF(SUM(CASE WHEN g.status IN ('DISPATCHED','DELIVERED','UNACCOUNTED')
+                                   THEN g.amount_usd ELSE 0 END), 0) AS unaccounted_rate,
+               AVG(g.transit_hours)                                  AS mean_transit_hours
+        FROM delivery_geometry g
+        JOIN staging_disbursements d USING (disbursement_id)
+        GROUP BY d.country
+        ORDER BY unaccounted_rate DESC
+        LIMIT 20
+    """,
+    note=(
+        "The same split one level up. Five corridors rather than sixteen "
+        "districts, which is the resolution at which the difference between "
+        "them is a claim rather than noise."
+    ),
+)
+
+Q_DELIVERY_RATE_WEEKLY = Query(
+    sql="""
+        SELECT DATE_TRUNC('week', dispatched_at)                     AS week,
+               COUNT(*)                                              AS events,
+               SUM(CASE WHEN status IN ('DISPATCHED','DELIVERED','UNACCOUNTED')
+                        THEN amount_usd ELSE 0 END)                  AS moved_usd,
+               SUM(CASE WHEN status = 'DELIVERED'
+                        THEN amount_usd ELSE 0 END)                  AS delivered_usd,
+               SUM(CASE WHEN status = 'UNACCOUNTED'
+                        THEN amount_usd ELSE 0 END)                  AS unaccounted_usd,
+               DIV0(SUM(CASE WHEN status = 'DELIVERED'
+                             THEN amount_usd ELSE 0 END),
+                    NULLIF(SUM(CASE WHEN status IN ('DISPATCHED','DELIVERED','UNACCOUNTED')
+                                    THEN amount_usd ELSE 0 END), 0)) AS delivery_rate
+        FROM MARTS.DELIVERY_GEOMETRY
+        WHERE dispatched_at IS NOT NULL
+        GROUP BY 1
+        ORDER BY 1
+        LIMIT 200
+    """,
+    local="""
+        SELECT DATE_TRUNC('week', dispatched_at)                     AS week,
+               COUNT(*)                                              AS events,
+               SUM(CASE WHEN status IN ('DISPATCHED','DELIVERED','UNACCOUNTED')
+                        THEN amount_usd ELSE 0 END)                  AS moved_usd,
+               SUM(CASE WHEN status = 'DELIVERED'
+                        THEN amount_usd ELSE 0 END)                  AS delivered_usd,
+               SUM(CASE WHEN status = 'UNACCOUNTED'
+                        THEN amount_usd ELSE 0 END)                  AS unaccounted_usd,
+               SUM(CASE WHEN status = 'DELIVERED'
+                        THEN amount_usd ELSE 0 END)
+                 / NULLIF(SUM(CASE WHEN status IN ('DISPATCHED','DELIVERED','UNACCOUNTED')
+                                   THEN amount_usd ELSE 0 END), 0)   AS delivery_rate
+        FROM delivery_geometry
+        WHERE dispatched_at IS NOT NULL
+        GROUP BY 1
+        ORDER BY 1
+        LIMIT 200
+    """,
+    note=(
+        "The calibration made visible. Each week's delivery rate against "
+        "the published World Food Programme ratio of 371 collected from 590 "
+        "moved. The aggregate is tuned to that figure; the weekly series "
+        "shows the spread the tuning leaves behind, which is the honest way "
+        "to display a calibrated number."
+    ),
+)
+
+Q_DISTRICT_LADDER = Query(
+    sql="""
+        SELECT COUNT(*)                                              AS events,
+               COUNT(DISTINCT org_id)                                AS orgs,
+               SUM(pledged_usd)                                      AS pledged_usd,
+               SUM(CASE WHEN status IN ('DISPATCHED','DELIVERED','UNACCOUNTED')
+                        THEN amount_usd ELSE 0 END)                  AS moved_usd,
+               SUM(CASE WHEN status = 'DELIVERED'
+                        THEN amount_usd ELSE 0 END)                  AS delivered_usd,
+               SUM(CASE WHEN status = 'DISPATCHED'
+                        THEN amount_usd ELSE 0 END)                  AS in_flight_usd,
+               SUM(CASE WHEN status = 'UNACCOUNTED'
+                        THEN amount_usd ELSE 0 END)                  AS unaccounted_usd,
+               COUNT_IF(geometry_verdict = 'OUTSIDE_FOOTPRINT')      AS outside_footprint,
+               COUNT_IF(geometry_verdict = 'IMPOSSIBLE_TRANSIT')     AS impossible_transit,
+               COUNT_IF(geometry_verdict = 'NEVER_ARRIVED')          AS never_arrived,
+               AVG(transit_hours)                                    AS mean_transit_hours
+        FROM MARTS.DELIVERY_GEOMETRY
+        WHERE district = ?
+    """,
+    local="""
+        SELECT COUNT(*)                                              AS events,
+               COUNT(DISTINCT org_id)                                AS orgs,
+               SUM(pledged_usd)                                      AS pledged_usd,
+               SUM(CASE WHEN status IN ('DISPATCHED','DELIVERED','UNACCOUNTED')
+                        THEN amount_usd ELSE 0 END)                  AS moved_usd,
+               SUM(CASE WHEN status = 'DELIVERED'
+                        THEN amount_usd ELSE 0 END)                  AS delivered_usd,
+               SUM(CASE WHEN status = 'DISPATCHED'
+                        THEN amount_usd ELSE 0 END)                  AS in_flight_usd,
+               SUM(CASE WHEN status = 'UNACCOUNTED'
+                        THEN amount_usd ELSE 0 END)                  AS unaccounted_usd,
+               COUNT(*) FILTER (WHERE geometry_verdict = 'OUTSIDE_FOOTPRINT')
+                                                                     AS outside_footprint,
+               COUNT(*) FILTER (WHERE geometry_verdict = 'IMPOSSIBLE_TRANSIT')
+                                                                     AS impossible_transit,
+               COUNT(*) FILTER (WHERE geometry_verdict = 'NEVER_ARRIVED')
+                                                                     AS never_arrived,
+               AVG(transit_hours)                                    AS mean_transit_hours
+        FROM delivery_geometry
+        WHERE district = ?
+    """,
+    note=(
+        "One district's whole ladder, for the handoff panel. Aggregate "
+        "only: no beneficiary column is selected here, because the point of "
+        "the handoff is that the next tab is the one allowed to answer "
+        "questions about people, and only under a policy."
+    ),
 )
 
 

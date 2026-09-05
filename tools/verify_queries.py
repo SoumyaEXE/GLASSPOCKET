@@ -31,6 +31,10 @@ PARAMS = {
     "Q_ORG_TRUST_CONTEXT": ("ORG_900000000",),
     "Q_ORG_TRUST_RANK": (44.5, 44.5, "disaster relief", "disaster relief",
                          44.5, "NY", "NY", 44.5),
+    # The Tab 04 handoff. A district that exists, for the same reason:
+    # a NULL filter proves the statement parses and proves nothing about
+    # whether it answers.
+    "Q_DISTRICT_LADDER": ("Rafah",),
     "Q_CELL_DRILLDOWN": ("872db6382ffffff",),
     "Q_RECEIPT_LOOKUP": ("none",),
     "Q_TIME_TRAVEL": ("ORG_900000000", "ORG_900000000"),

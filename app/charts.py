@@ -19,6 +19,8 @@ rather than remembered:
 
 from __future__ import annotations
 
+import math
+
 import plotly.graph_objects as go
 
 from theme import (
@@ -923,32 +925,55 @@ def verdict_donut(df, centre_value: str) -> go.Figure:
 
 
 # ---------------------------------------------------------------------------
-# C04-1 / Sankey, C04-2 / Transit feasibility
+# C04-1 / Sankey, C04-2 / Transit, C04-3 / Where it stops, C04-4 / Calibration
+#
+# THE FOUR STATUSES ARE NEVER COLLAPSED, HERE EITHER. Tab 03 says that
+# about a stacked area; it holds with more force on this tab, because
+# this is the tab that names the leak. Money that is still in a warehouse
+# has not gone missing. Money nobody can account for has. A chart that
+# adds the two together and calls the sum attrition is the chart the
+# whole application argues against, and the shipped version of the
+# district bars was exactly that chart.
 # ---------------------------------------------------------------------------
 
 
-def attrition_sankey(stages: dict) -> go.Figure:
+def attrition_sankey(stages: dict, *, height: int = 400) -> go.Figure:
     """Pledged to delivered, four node columns, link width in dollars.
 
     The link into unaccounted is Flag Red and is deliberately the visually
     heaviest element on the tab.
+
+    The node labels carry their own dollars. A Sankey without them is a
+    picture of proportions that the reader has to translate back into
+    money by hovering, and the two figures the tab is actually about are
+    the two leaks, which are the two smallest ribbons on the diagram.
     """
+    dispatched = max(0.0, float(stages.get("dispatched_usd") or 0))
+    never = max(0.0, float(stages.get("never_dispatched_usd") or 0))
+    delivered = max(0.0, float(stages.get("delivered_usd") or 0))
+    unaccounted = max(0.0, float(stages.get("unaccounted_usd") or 0))
+    in_flight = max(0.0, dispatched - delivered - unaccounted)
+
+    def _m(value: float) -> str:
+        return f"${value / 1e6:,.2f}m"
+
     labels = [
-        "pledged", "dispatched", "never dispatched", "delivered", "unaccounted",
+        "pledged  " + _m(dispatched + never),
+        "dispatched  " + _m(dispatched),
+        "never dispatched  " + _m(never),
+        "delivered  " + _m(delivered),
+        "still in flight  " + _m(in_flight),
+        "unaccounted  " + _m(unaccounted),
     ]
-    source = [0, 0, 1, 1]
-    target = [1, 2, 3, 4]
-    values = [
-        stages["dispatched_usd"],
-        max(0.0, stages["never_dispatched_usd"]),
-        stages["delivered_usd"],
-        stages["unaccounted_usd"],
-    ]
+    source = [0, 0, 1, 1, 1]
+    target = [1, 2, 3, 4, 5]
+    values = [dispatched, never, delivered, in_flight, unaccounted]
     link_colours = [
-        "rgba(41,181,232,0.45)",   # pledged -> dispatched
-        "rgba(107,114,128,0.35)",  # pledged -> never dispatched
-        "rgba(23,163,74,0.45)",    # dispatched -> delivered
-        "rgba(229,72,77,0.75)",    # dispatched -> unaccounted, heaviest
+        "rgba(41,181,232,0.42)",   # pledged -> dispatched
+        "rgba(107,114,128,0.32)",  # pledged -> never dispatched
+        "rgba(23,163,74,0.42)",    # dispatched -> delivered
+        "rgba(41,181,232,0.34)",   # dispatched -> still in flight
+        "rgba(229,72,77,0.78)",    # dispatched -> unaccounted, heaviest
     ]
 
     fig = go.Figure(
@@ -956,71 +981,292 @@ def attrition_sankey(stages: dict) -> go.Figure:
             arrangement="snap",
             node=dict(
                 label=labels,
-                pad=26,
-                thickness=16,
+                pad=24,
+                thickness=15,
                 line=dict(color=BORDER, width=1),
                 color=[SNOWFLAKE_BLUE, SNOWFLAKE_BLUE, NEUTRAL,
-                       CONFIRMED_GREEN, FLAG_RED],
-                hovertemplate="%{label}: $%{value:,.0f}<extra></extra>",
+                       CONFIRMED_GREEN, SNOWFLAKE_BLUE, FLAG_RED],
+                hovertemplate="%{label}<extra></extra>",
             ),
             link=dict(
                 source=source, target=target, value=values, color=link_colours,
                 hovertemplate="$%{value:,.0f}<extra></extra>",
             ),
-            textfont=dict(family=FONT, size=13, color=TEXT),
+            textfont=dict(family=FONT, size=12, color=TEXT),
         )
     )
-    return style_fig(fig, height=400)
+    fig = style_fig(fig, height=height)
+    # A node label on the rightmost column needs room to sit to the right
+    # of its own bar, and the default margin clips it mid-word.
+    fig.update_layout(margin=dict(l=8, r=8, t=18, b=8))
+    return fig
 
 
-def transit_feasibility(df, max_kmh: float = 90.0) -> go.Figure:
-    """Transit time against distance, with a shaded impossible region.
+# The two speed regimes the transit section is drawn against. Neither is
+# a rule this build enforces; they are there so the distribution has
+# something to be read against, and both are labelled on the chart.
+ROAD_KMH = 90.0     # a loaded truck on a good road
+JET_KMH = 900.0     # a freight aircraft at cruise
 
-    The most immediately legible signal in the whole application because
-    it needs no explanation: a truck cannot cover four hundred kilometres
-    in under an hour.
+
+def transit_speed_profile(df, *, instantaneous: int = 0,
+                          height: int = 340) -> go.Figure:
+    """Implied speed of every delivery that has a finite one.
+
+    WHY THIS REPLACED THE SCATTER IT USED TO BE.
+
+        The old chart plotted transit hours against kilometres from base
+        and shaded everything under a 90 km/h line as physically
+        impossible. It labelled 6,828 of 8,545 deliveries that way, while
+        the warehouse records 199 as IMPOSSIBLE_TRANSIT. The shading was
+        wrong, not the data: km_from_base is measured from the
+        organisation's registered filing address in the United States,
+        the delivery is on another continent, and 10,000 kilometres in
+        two days is 218 km/h, which is air freight doing exactly what air
+        freight does. A rule that flags four deliveries in five has not
+        found anything.
+
+        So the axis is the implied speed itself, on a log scale, read
+        against two labelled reference speeds rather than against a
+        threshold this build never shipped. The distribution sits in the
+        air-freight band, which is the honest reading, and the tail past
+        cruise speed is visible as a tail rather than as an accusation.
+
+    ``instantaneous`` is the count of deliveries recorded as arriving in
+    the hour they were dispatched. They have no implied speed at all,
+    only a division by zero, so they are annotated rather than binned:
+    putting them in a histogram would place the fastest events in the
+    corpus at the slow end of it.
     """
-    exceeds = as_bool(df["exceeds_plausible_speed"])
-    ok = df[~exceeds]
-    bad = df[exceeds]
-    max_km = float(df["km_from_base"].max() or 1)
+    speeds = [float(v) for v in df["implied_kmh"] if v is not None and v == v]
+    speeds = [v for v in speeds if v > 0]
+    low = min(speeds + [ROAD_KMH]) * 0.92
+    high = max(speeds + [JET_KMH]) * 1.06
+
+    # Explicit edges so the two reference speeds are bin boundaries. A
+    # bin that straddles 90 km/h cannot be coloured honestly, and the
+    # whole point of the colouring is that each bar sits in one regime.
+    def _log_edges(a: float, b: float, n: int) -> list[float]:
+        step = (math.log(b) - math.log(a)) / n
+        return [math.exp(math.log(a) + step * k) for k in range(n + 1)]
+
+    edges = (_log_edges(low, ROAD_KMH, 2)[:-1]
+             + _log_edges(ROAD_KMH, JET_KMH, 22)[:-1]
+             + _log_edges(JET_KMH, high, 8))
+
+    counts = [0] * (len(edges) - 1)
+    for value in speeds:
+        lo, hi = 0, len(counts) - 1
+        while lo < hi:                       # the bin whose right edge clears it
+            mid = (lo + hi) // 2
+            if value <= edges[mid + 1]:
+                hi = mid
+            else:
+                lo = mid + 1
+        counts[lo] += 1
+
+    centres, colours, widths, hovers = [], [], [], []
+    for k, n in enumerate(counts):
+        a, b = edges[k], edges[k + 1]
+        # A bar on a log axis is still positioned and sized in ordinary
+        # data units. Plotly places its two edges at x plus or minus half
+        # the width and maps those through the log afterwards, so the
+        # centre is the arithmetic one and the width is kilometres per
+        # hour. Sizing it in decades is what rendered thirty-two
+        # hairlines the first time this chart was drawn.
+        centres.append((a + b) / 2.0)
+        widths.append(b - a)
+        # The edges are built by exp of log, so a reference speed comes
+        # back as 900.0000000000001 rather than as 900 and a strict
+        # comparison paints the bar below cruise as though it were above.
+        if b <= ROAD_KMH * 1.000001:
+            colours.append(NEUTRAL)
+            band = "at road speed"
+        elif b <= JET_KMH * 1.000001:
+            colours.append(SNOWFLAKE_BLUE)
+            band = "in the air-freight band"
+        else:
+            colours.append(NOISE_AMBER)
+            band = "above jet cruise"
+        hovers.append(
+            f"{a:,.0f} to {b:,.0f} km/h &middot; {n:,} deliveries {band}"
+        )
 
     fig = go.Figure()
-    # The impossible region: below the plausible-speed line.
-    fig.add_scatter(
-        x=[0, max_km, max_km, 0],
-        y=[0, max_km / max_kmh, 0, 0],
-        fill="toself",
-        fillcolor="rgba(229,72,77,0.07)",
-        line=dict(width=0),
-        hoverinfo="skip",
+    fig.add_bar(
+        x=centres, y=counts, width=widths,
+        marker=dict(color=colours, line=dict(width=0)),
+        customdata=hovers,
+        hovertemplate="%{customdata}<extra></extra>",
         showlegend=False,
     )
-    fig.add_scatter(
-        x=[0, max_km], y=[0, max_km / max_kmh], mode="lines",
-        line=dict(color=FLAG_RED, width=1.5, dash="dash"),
-        name=f"{max_kmh:.0f} km/h",
-        hoverinfo="skip",
+    for speed, label, anchor in (
+        (ROAD_KMH, "a truck on a good road, 90 km/h", "left"),
+        (JET_KMH, "freight aircraft at cruise, 900 km/h", "right"),
+    ):
+        fig.add_vline(x=speed,
+                      line=dict(color=TEXT_MUTED, width=1, dash="dot"))
+        # The line takes its x in data units and the annotation takes its
+        # x in axis units, which on a log axis are decades. Passing the
+        # speed to both put the label at ten to the ninetieth power,
+        # which is off the chart and renders as nothing at all.
+        fig.add_annotation(
+            x=math.log10(speed), y=1.0, xref="x", yref="paper",
+            text=label, showarrow=False,
+            xanchor=anchor, yanchor="bottom",
+            xshift=6 if anchor == "left" else -6,
+            font=dict(family=FONT, size=11, color=TEXT_MUTED),
+        )
+
+    fig = style_fig(fig, height=height)
+    # style_fig sets a 28 px top margin and a reference line's own label
+    # does not fit in it. update_layout merges recursively, so the
+    # override has to come after the styling gate rather than before.
+    fig.update_layout(margin=dict(l=8, r=8, t=46, b=8), bargap=0.06)
+    # A log axis left to itself labels its minor ticks, and over a range
+    # this narrow the result reads 8, 9, 100, 2, 3, 4 rather than as
+    # speeds. The ticks are named explicitly instead.
+    ticks = [t for t in (80, 100, 150, 200, 300, 500, 700, 1000, 1500, 2000)
+             if low <= t <= high]
+    fig.update_xaxes(
+        type="log", range=[math.log10(low), math.log10(high)],
+        tickmode="array", tickvals=ticks,
+        ticktext=[f"{t:,}" for t in ticks],
+        title=dict(text="implied speed, kilometres per hour",
+                   font=dict(family=FONT, size=12, color=TEXT_MUTED)),
     )
-    fig.add_scatter(
-        x=ok["km_from_base"], y=ok["transit_hours"], mode="markers",
-        marker=dict(size=6, color=SNOWFLAKE_BLUE, opacity=0.55),
-        name="plausible",
-        customdata=ok[["disbursement_id"]],
-        hovertemplate="%{customdata[0]}<br>%{x:.0f} km in %{y:.1f} h<extra></extra>",
+    fig.update_yaxes(
+        title=dict(text="deliveries",
+                   font=dict(family=FONT, size=12, color=TEXT_MUTED)),
     )
+    if instantaneous:
+        fig.add_annotation(
+            xref="paper", yref="paper", x=1.0, y=0.86,
+            xanchor="right", yanchor="top", align="right", showarrow=False,
+            text=(f"<b>{instantaneous:,} more are not on this chart</b><br>"
+                  "recorded arriving in the hour they left,<br>"
+                  "four hundred kilometres away or further"),
+            font=dict(family=FONT, size=11, color=FLAG_RED),
+            bgcolor="rgba(255,255,255,0.86)",
+            bordercolor=FLAG_RED, borderwidth=1, borderpad=7,
+        )
+    return fig
+
+
+def attrition_split(df, label_column: str, *, height: int = 420,
+                    as_share: bool = True) -> go.Figure:
+    """One horizontal bar per place, split by where the money ended up.
+
+    Three segments, three statuses, three colours that mean the same
+    thing on every tab in the build. As a share by default, because the
+    question the section asks is which corridor loses the most of what
+    passes through it, and a dollar bar answers a different question:
+    which corridor is biggest.
+    """
+    labels = list(df[label_column])
+    moved = [max(float(v or 0), 1.0) for v in df["moved_usd"]]
+    fig = go.Figure()
+    for name, column, colour in (
+        ("delivered", "delivered_usd", CONFIRMED_GREEN),
+        ("still in flight", "in_flight_usd", SNOWFLAKE_BLUE),
+        ("unaccounted", "unaccounted_usd", FLAG_RED),
+    ):
+        raw = [float(v or 0) for v in df[column]]
+        if as_share:
+            values = [100.0 * v / m for v, m in zip(raw, moved)]
+            hover = ("%{y}<br>" + name
+                     + " %{x:.1f}% &middot; $%{customdata:,.0f}<extra></extra>")
+        else:
+            values = raw
+            hover = "%{y}<br>" + name + " $%{x:,.0f}<extra></extra>"
+        # Only the unaccounted segment is labelled. Every bar is the same
+        # length here, so the eye has nothing to compare except that one
+        # segment, and asking the reader to judge four percentage points
+        # by the width of a red block is asking too much. Labelling all
+        # three would put three numbers on a bar to make one point.
+        #
+        # The label sits outside the bar, not inside it. Inside, Plotly
+        # drops any label its own segment is too narrow to hold, which
+        # silently unlabelled five of the sixteen districts and made the
+        # five that lost their label look like the ones with nothing to
+        # report. Outside, every label is drawn and they line up in a
+        # column, which is easier to read down than a staggered set.
+        label_kw = {}
+        if as_share and column == "unaccounted_usd":
+            label_kw = dict(
+                text=[f"{v:.1f}%" for v in values],
+                textposition="outside",
+                textfont=dict(family=FONT, size=11, color=FLAG_RED),
+                cliponaxis=False, constraintext="none",
+            )
+        fig.add_bar(
+            y=labels, x=values, orientation="h", name=name,
+            marker=dict(color=colour),
+            customdata=raw,
+            hovertemplate=hover,
+            **label_kw,
+        )
+    fig = style_fig(fig, height=height, legend=True)
+    # A horizontal stack reads left to right and so must its legend;
+    # Plotly reverses the order by default to match vertical stacking.
+    fig.update_layout(barmode="stack", bargap=0.34, legend_traceorder="normal")
+    fig.update_yaxes(autorange="reversed")
+    if as_share:
+        # The range runs past 100 to leave the outside labels somewhere to
+        # sit; the ticks stop at 100, because 108 percent of a thing is
+        # not a number this chart should appear to be offering.
+        fig.update_xaxes(range=[0, 109], showgrid=True, gridcolor="#F0F2F4",
+                         tickmode="array",
+                         tickvals=[0, 20, 40, 60, 80, 100],
+                         ticktext=["0%", "20%", "40%", "60%", "80%", "100%"])
+    else:
+        fig.update_xaxes(tickprefix="$", separatethousands=True, showgrid=True,
+                         gridcolor="#F0F2F4")
+    return fig
+
+
+def delivery_rate_weekly(df, *, benchmark: float, benchmark_label: str,
+                         height: int = 300) -> go.Figure:
+    """Weekly delivery rate against the published ratio it is tuned to.
+
+    A calibrated aggregate is a claim about one number. Drawing the weeks
+    it is made of shows the spread that tuning leaves behind, which is
+    the part a single headline percentage hides.
+    """
+    weeks = list(df["week"])
+    rate = [100.0 * float(v or 0) for v in df["delivery_rate"]]
+    moved = [float(v or 0) for v in df["moved_usd"]]
+
+    fig = go.Figure()
     fig.add_scatter(
-        x=bad["km_from_base"], y=bad["transit_hours"], mode="markers",
-        marker=dict(size=8, color=FLAG_RED, opacity=0.9),
-        name="physically impossible",
-        customdata=bad[["disbursement_id"]],
-        hovertemplate="%{customdata[0]}<br>%{x:.0f} km in %{y:.1f} h<extra></extra>",
+        x=weeks, y=rate, mode="lines+markers",
+        line=dict(color=SNOWFLAKE_BLUE, width=2, shape="spline", smoothing=0.6),
+        marker=dict(size=6, color=SNOWFLAKE_BLUE,
+                    line=dict(width=1.5, color="#FFFFFF")),
+        customdata=moved,
+        name="weekly delivery rate",
+        hovertemplate=("week of %{x|%d %b}<br>%{y:.1f}% delivered"
+                       " of $%{customdata:,.0f} moved<extra></extra>"),
     )
-    fig.update_xaxes(title=dict(text="kilometres from registered base",
-                                font=dict(family=FONT, size=12, color=TEXT_MUTED)))
-    fig.update_yaxes(title=dict(text="hours in transit",
-                                font=dict(family=FONT, size=12, color=TEXT_MUTED)))
-    return style_fig(fig, height=340, legend=True)
+    fig.add_hline(
+        y=benchmark * 100.0,
+        line=dict(color=CONFIRMED_GREEN, width=1.4, dash="dash"),
+        annotation_text=benchmark_label,
+        annotation_position="bottom right",
+        annotation_font=dict(family=FONT, size=11, color=CONFIRMED_GREEN),
+    )
+    fig = style_fig(fig, height=height)
+    span = max(rate + [benchmark * 100.0]) - min(rate + [benchmark * 100.0])
+    pad = max(span * 0.35, 2.0)
+    fig.update_yaxes(
+        range=[min(rate + [benchmark * 100.0]) - pad,
+               max(rate + [benchmark * 100.0]) + pad],
+        ticksuffix="%",
+        title=dict(text="share of dispatched dollars delivered",
+                   font=dict(family=FONT, size=11, color=TEXT_MUTED)),
+    )
+    fig.update_xaxes(showgrid=False, tickformat="%d %b")
+    return fig
 
 
 # ---------------------------------------------------------------------------

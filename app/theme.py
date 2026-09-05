@@ -251,6 +251,17 @@ header[data-testid="stHeader"] {
   font-size: 11px; font-feature-settings: 'tnum' 1;
 }
 
+/* A chart legend rendered on the panel head rather than inside the
+   figure. Plotly's own legend sits above the plot and pushes it down by
+   its own height; this one sits on a line that already exists, so two
+   panels in a row still end level with one another. */
+.gp-swatch {
+  display: inline-flex; align-items: center; gap: 6px; margin-left: 12px;
+  font-size: 11px; font-weight: 600; letter-spacing: 0.06em;
+  text-transform: uppercase; color: #6B7280; white-space: nowrap;
+}
+.gp-swatch i { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
+
 /* ---------------------------- comparison cards -------------------- */
 .gp-card {
   border: 1px solid #E4E7EB; border-radius: 6px; padding: 20px;
@@ -276,6 +287,14 @@ header[data-testid="stHeader"] {
 .gp-reveal { animation: gpReveal 400ms cubic-bezier(0.22, 0.61, 0.36, 1) both; }
 
 /* ------------------------------- explainer ------------------------ */
+/* One grid rather than a row of Streamlit columns. Grid items stretch
+   to the tallest in their row for free, which is the whole reason the
+   explainer is not laid out with st.columns any more, and auto-fit wraps
+   five cards onto two lines instead of crushing them. */
+.gp-steps {
+  display: grid; gap: 12px; align-items: stretch;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+}
 .gp-step {
   border: 1px solid #E4E7EB; border-radius: 6px; padding: 16px; height: 100%;
 }
@@ -656,7 +675,13 @@ div[data-testid="stSegmentedControl"] button[kind="segmented_controlActive"] {
 }
 
 /* A figure and its label, sitting under a chart inside a panel. */
-.gp-readout { display: flex; gap: 28px; flex-wrap: wrap; margin-top: 4px; }
+/* The bottom margin is not decoration. A readout is followed by a
+   paragraph often enough that without it the label tokens and the
+   first line of prose sit on top of one another. */
+.gp-readout {
+  display: flex; gap: 28px; flex-wrap: wrap;
+  margin-top: 4px; margin-bottom: 12px;
+}
 .gp-readout-item { min-width: 96px; }
 .gp-readout-v {
   font-size: 20px; font-weight: 700; letter-spacing: -0.03em; color: #08090B;

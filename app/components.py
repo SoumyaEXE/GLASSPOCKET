@@ -229,27 +229,38 @@ def chips(items: Iterable[tuple[str, str]]) -> None:
 
 
 def step_explainer(steps: Sequence[tuple[str, str]]) -> None:
-    """Three or four numbered blocks in a horizontal row.
+    """Three to five numbered blocks in a horizontal row.
 
     Used at the foot of most tabs to explain the mechanism in plain
     language. This is what makes the application legible to a
     non-technical judge, so the copy carries no jargon.
+
+    ONE GRID, NOT A ROW OF STREAMLIT COLUMNS.
+
+        The cards used to be one per st.column. ``.gp-step`` asks for
+        ``height: 100%``, but a column's own vertical block is only as
+        tall as what is inside it, so the percentage resolved against
+        auto and every card was exactly its own copy tall. Five of them
+        with unequal copy came out as five different boxes on a ragged
+        baseline, which is what the row looked like at the foot of The
+        Last Mile.
+
+        A CSS grid stretches its items to the tallest in the row without
+        being asked, and ``auto-fit`` wraps five cards onto two lines on
+        a narrow viewport rather than crushing them to 180 pixels each.
+        The markup is emitted as one line: a blank line inside a block of
+        HTML ends the block as far as the markdown parser is concerned.
+        See ``table`` for the same trap.
     """
-    steps = list(steps)
-    for idx, (col, (title, body)) in enumerate(
-        zip(st.columns(len(steps), gap="small"), steps), start=1
-    ):
-        with col:
-            st.markdown(
-                f"""
-                <div class="gp-step">
-                  <div class="gp-step-n">{idx:02d}</div>
-                  <div class="gp-step-title">{_esc(title)}</div>
-                  <div class="gp-step-body">{_esc(body)}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+    cards = "".join(
+        '<div class="gp-step">'
+        f'<div class="gp-step-n">{idx:02d}</div>'
+        f'<div class="gp-step-title">{_esc(title)}</div>'
+        f'<div class="gp-step-body">{_esc(body)}</div>'
+        "</div>"
+        for idx, (title, body) in enumerate(steps, start=1)
+    )
+    st.markdown(f'<div class="gp-steps">{cards}</div>', unsafe_allow_html=True)
 
 
 def compare_columns(
