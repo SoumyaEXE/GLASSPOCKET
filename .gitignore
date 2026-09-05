@@ -22,6 +22,7 @@ data/geo/
 data/synthetic/
 data/*.duckdb
 data/*.parquet
+*.csv
 
 # The generated app/assets/geist.css is committed, and so are the four
 # woff2 faces plus the variable face it is built from: 264 KB total, and
