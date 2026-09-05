@@ -5,7 +5,8 @@
 # BEFORE the first commit, not after. If a key is ever exposed, rotate it
 # and note the rotation in the README rather than quietly rewriting history.
 
-# secrets
+# 
+algorithm_blog/
 .env
 .env.*
 !.env.example
