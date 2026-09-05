@@ -68,8 +68,8 @@ def main() -> int:
 
     # ------------------------------------------------------------------
     # Interactive paths. First render only exercises about half the code:
-    # the Tab 01 reveal and the Tab 05 release are where the charts that
-    # carry the argument actually live.
+    # the Give With Confidence reveal and The Historian's apply are where
+    # the charts that carry the argument actually live.
     # ------------------------------------------------------------------
 
     # Navigation is a rail now, so each section has to be selected before
@@ -109,24 +109,33 @@ def main() -> int:
             print("  MISSING   the gap is not reported in words after the reveal")
             problems += 1
 
-    goto(5)   # The Wall
-    release = [b for b in at.button if b.label == "release the answer"]
-    if not release:
-        print("  MISSING   The Wall has no release control")
-        problems += 1
-    else:
-        release[0].click().run()
-        problems += _problems(at, "tab 05 release")
-        print(f"after release    charts {_charts(at)}")
+    # The Wall used to be walked here, between the reveal and the tamper.
+    # It has been removed along with Method And Honesty, so the rail is
+    # nine entries and The Historian has moved from position 7 to 6.
+    # Positions are resolved from the rail rather than hard-coded, so
+    # that the next tab to move does not silently skip its own test the
+    # way renaming the apply button once did.
+    def goto_named(name: str) -> bool:
+        entries = [b for b in at.button if b.key and b.key.startswith("gp_nav_")]
+        for index, entry in enumerate(entries):
+            if name.lower() in (entry.label or "").lower():
+                goto(index)
+                return True
+        return False
 
-    goto(7)   # The Historian
+    if not goto_named("The Historian"):
+        print("  MISSING   The Historian is not on the rail")
+        problems += 1
     # Matched by prefix, not by the whole label. An exact match meant
     # that renaming the button to "apply the change" silently skipped the
     # tamper path and the run still reported clean, which is the worst
     # thing a smoke test can do.
     apply_change = [b for b in at.button
                     if (b.label or "").startswith("apply")]
-    if apply_change:
+    if not apply_change:
+        print("  MISSING   The Historian has no apply control")
+        problems += 1
+    else:
         apply_change[0].click().run()
         problems += _problems(at, "tab 07 apply")
         print(f"after tamper     charts {_charts(at)}")

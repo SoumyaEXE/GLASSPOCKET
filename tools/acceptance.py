@@ -183,10 +183,14 @@ def craft() -> None:
         all("provenance_footer(" in p.read_text(encoding="utf-8")
             for p in (app / "tabs").glob("tab_*.py")),
     )
+    # Nine, since The Wall and Method And Honesty were removed. The count
+    # is still asserted rather than left loose, so a tab going missing by
+    # accident fails the build; it just has to be updated deliberately
+    # when one goes on purpose.
     check(
         "CRF-06", "craft",
-        "Eleven tab modules exist",
-        len(list((app / "tabs").glob("tab_*.py"))) == 11,
+        "Nine tab modules exist",
+        len(list((app / "tabs").glob("tab_*.py"))) == 9,
     )
 
     # No inline SQL in a tab module. Section 04, CONVENTION.
@@ -202,8 +206,7 @@ def craft() -> None:
     )
 
     # No AI function or embedding call reachable from a render path.
-    # Naming them in the Tab 10 feature inventory is the point of that
-    # tab, so only an actual invocation counts.
+    # Only an actual invocation counts; naming one in prose does not.
     check(
         "CRF-08", "craft",
         "No AI_EMBED or AI_FILTER invocation appears in the application",
@@ -231,34 +234,42 @@ def craft() -> None:
     )
 
     # The build must not claim a guarantee the platform did not give it.
-    # Tab 05 ships a minimum-cohort floor, so it may name differential
-    # privacy only to say it is NOT what is running.
-    wall_lines = (app / "tabs" / "tab_05_wall.py").read_text(
-        encoding="utf-8").splitlines()
-    # Permitted only where the surrounding sentence draws a contrast with
-    # differential privacy, never where it asserts the build has it. The
-    # window is needed because the copy wraps across several source lines.
+    # It ships a minimum-cohort floor, so it may name differential privacy
+    # only to say it is NOT what is running. This used to read Tab 05
+    # alone; with that tab removed the phrase can turn up anywhere, so the
+    # check sweeps every tab rather than the one that used to own it.
     contrast = ("not ", "rather than", "does not", "unavailable", "no ",
                 "instead", "difference", "cannot", "would", "specif",
                 "defends", "fallback")
     claims = []
-    for idx, line in enumerate(wall_lines):
-        if "differential privacy" not in line.lower():
-            continue
-        window = "\n".join(wall_lines[max(0, idx - 4): idx + 5]).lower()
-        if not any(t in window for t in contrast):
-            claims.append(line.strip())
+    for path in sorted((app / "tabs").glob("tab_*.py")):
+        lines_ = path.read_text(encoding="utf-8").splitlines()
+        for idx, line in enumerate(lines_):
+            if "differential privacy" not in line.lower():
+                continue
+            # The window is needed because the copy wraps across several
+            # source lines and the contrast often sits on a neighbour.
+            window = "\n".join(lines_[max(0, idx - 4): idx + 5]).lower()
+            if not any(t in window for t in contrast):
+                claims.append(f"{path.name}: {line.strip()}")
     check(
         "CRF-11", "craft",
-        f"Tab 05 never claims differential privacy"
-        f"{' (' + claims[0][:50] + ')' if claims else ''}",
+        f"No tab claims differential privacy"
+        f"{' (' + claims[0][:60] + ')' if claims else ''}",
         not claims,
     )
+    # The disclosure moved to The Brief when Method And Honesty was
+    # removed, because the banner on every screen promises it. The check
+    # follows it rather than being dropped: an application that seeds its
+    # own adversaries and does not say so is the failure mode this whole
+    # suite exists to catch.
+    brief = (app / "tabs" / "tab_00_brief.py").read_text(encoding="utf-8")
     check(
         "CRF-12", "craft",
-        "The substitution is disclosed on the Method tab",
-        "platform would not give us"
-        in (app / "tabs" / "tab_10_method.py").read_text(encoding="utf-8"),
+        "What is real and what is seeded is disclosed on The Brief",
+        "REAL_VERSUS_SEEDED" in brief
+        and "Entirely synthetic" in brief
+        and "NOT differential privacy" in brief,
     )
 
     # Framing rule. The word fraud may appear only where a source is quoted.
