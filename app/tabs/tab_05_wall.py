@@ -361,16 +361,20 @@ def _differencing(filters: dict, floor: int) -> None:
              f"{C.usd(demo['threshold'], precise=True)}",
              f"{b['cohort']:,} people · {C.usd(b['total_usd'])}"),
             ("the difference",
-             f"{demo['difference_people']} people · "
-             f"{C.usd(abs(demo['difference_usd']))}"),
+             f"{demo['difference_people']} people, who received "
+             f"{C.usd(abs(demo['difference_usd']))} between them"),
         ])
         C.verdict(
             f"You have just learned about {demo['difference_people']} people",
             f"That group is smaller than the floor of {demo['floor']}, so it "
-            "could never have been asked about directly. It was not asked "
-            "about directly. It was arrived at by subtracting two answers "
-            "the policy was happy to give, and no rule in this deployment "
-            "noticed or could have noticed.",
+            "could never have been asked about directly, and it was not. It "
+            "fell out of subtracting two answers the policy was happy to "
+            "give, and no rule in this deployment noticed or could have "
+            "noticed. Note what you now know about them: not a total, but "
+            "that they exist, how many they are, where they are, and that "
+            "they received nothing. A cohort floor protects a group by "
+            "refusing to describe it. It has no answer for a group that is "
+            "never described, only inferred.",
             "wrong",
         )
         C.source_note(
@@ -391,7 +395,7 @@ def _differencing(filters: dict, floor: int) -> None:
                  ("everyone", "gp-td-num"),
                  ("received anything", "gp-td-num"),
                  ("learned about", "gp-td-num"),
-                 ("worth", "gp-td-num")],
+                 ("who received", "gp-td-num")],
                 [[
                     d.get("scope", "—"),
                     f"{d['group_a']['cohort']:,}",

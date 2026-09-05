@@ -1363,10 +1363,12 @@ def cohort_landscape(df, floor: int, *, marker_at: int | None = None,
             x=max(marker_at, 1),
             line=dict(color=CONFIRMED_GREEN, width=1.5, dash="dot"),
         )
+        # Above the plot, alongside the floor label. Below it, the
+        # annotation lands in the axis title and overprints it.
         fig.add_annotation(
-            x=math.log10(max(marker_at, 1)), y=-0.02, xref="x", yref="paper",
+            x=math.log10(max(marker_at, 1)), y=1.0, xref="x", yref="paper",
             text="your question", showarrow=False,
-            xanchor="right", yanchor="top", xshift=-6,
+            xanchor="right", yanchor="bottom", xshift=-6,
             font=dict(family=FONT, size=11, color=CONFIRMED_GREEN),
         )
 
@@ -1444,10 +1446,11 @@ def differencing_bars(demo, *, height: int = 260) -> go.Figure:
     b = demo["group_b"]
     gap = demo["difference_people"]
     floor = demo["floor"]
+    threshold = float(demo.get("threshold") or 0)
 
     fig = go.Figure()
     fig.add_bar(
-        y=["everyone in scope", "those above the threshold"],
+        y=["everyone in scope", f"those receiving at least ${threshold:,.0f}"],
         x=[a["cohort"], b["cohort"]], orientation="h",
         marker=dict(color=[SNOWFLAKE_BLUE, SNOWFLAKE_BLUE]),
         text=[f"{a['cohort']:,} people", f"{b['cohort']:,} people"],
