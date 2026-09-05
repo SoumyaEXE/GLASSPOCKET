@@ -117,11 +117,11 @@ Q_OBJECT_INVENTORY = Query(
     """,
     local="""
         SELECT * FROM (VALUES
-            ('RAW',     4, 0, 0, 45400),
-            ('STAGING', 5, 1, 1, 54100),
-            ('MARTS',  14, 5, 2, 21800),
-            ('SERVING',13, 0,13,     0),
-            ('ORACLE',  4, 0, 1,  8545)
+            ('RAW',    10, 0,  0,  80103),
+            ('STAGING', 6, 1,  0, 106620),
+            ('MARTS',  21, 6,  1, 112317),
+            ('SERVING',23, 0, 23,      0),
+            ('ORACLE',  4, 0,  1,   4647)
         ) AS t(schema_name, objects, dynamic_tables, views, total_rows)
     """,
     note=(
@@ -142,7 +142,8 @@ Q_CONFIDENCE_PAIRS = Query(
                suspect_state, suspect_cause,
                target_id, target_name, target_blurb, target_city,
                target_state, target_cause,
-               semantic_sim, string_sim, evasion_gap, synth_technique
+               semantic_sim, string_sim, evasion_gap, synth_technique,
+               confirmation_method
         FROM SERVING.V_CONFIDENCE_PAIRS
         ORDER BY evasion_gap DESC
         LIMIT 200
@@ -155,7 +156,8 @@ Q_CONFIDENCE_PAIRS = Query(
           c.target_id, c.target_name,
           t.blurb AS target_blurb, t.city AS target_city,
           t.state AS target_state, t.cause AS target_cause,
-          c.semantic_sim, c.string_sim, c.evasion_gap, c.synth_technique
+          c.semantic_sim, c.string_sim, c.evasion_gap, c.synth_technique,
+          c.confirmation_method
         FROM clone_confirmed c
         JOIN staging_orgs s ON s.org_id = c.suspect_id
         JOIN staging_orgs t ON t.org_id = c.target_id
@@ -168,7 +170,9 @@ Q_CONFIDENCE_PAIRS = Query(
 
 Q_ORG_RISK_ONE = Query(
     sql="""
-        SELECT org_id, name, risk_score, verdict,
+        SELECT org_id, name, ein, city, state, cause,
+               is_synthetic, is_verified, synth_technique,
+               risk_score, verdict,
                comp_semantic, comp_evasion, comp_geometry,
                comp_unaccounted, comp_receipts,
                semantic_sim, evasion_gap, geom_flags,
@@ -177,14 +181,21 @@ Q_ORG_RISK_ONE = Query(
         WHERE org_id = ?
     """,
     local="""
-        SELECT org_id, name, risk_score, verdict,
+        SELECT org_id, name, ein, city, state, cause,
+               is_synthetic, is_verified, synth_technique,
+               risk_score, verdict,
                comp_semantic, comp_evasion, comp_geometry,
                comp_unaccounted, comp_receipts,
                semantic_sim, evasion_gap, geom_flags,
                unaccounted_ratio, missing_receipts
         FROM org_risk WHERE org_id = ?
     """,
-    note="The five components, so the waterfall reconstructs the total by eye.",
+    note=(
+        "The five components, so the waterfall reconstructs the total by "
+        "eye, plus the filing fields Tab 01 lays side by side. The record "
+        "diff is the payoff of that tab and it needs the EIN, which is "
+        "the one field an impersonator cannot copy."
+    ),
 )
 
 Q_PROJECTION = Query(
@@ -325,11 +336,9 @@ Q_THRESHOLD_CALIBRATION = Query(
         LIMIT 40
     """,
     local="""
-        SELECT threshold, pairs_detected,
-               pairs_ai_confirmed AS true_pairs,
-               NULL AS precision_at, NULL AS recall_at,
-               is_production_value
-        FROM threshold_curve ORDER BY threshold LIMIT 40
+        SELECT threshold, pairs_detected, true_pairs,
+               precision_at, recall_at, is_production_value
+        FROM threshold_calibration ORDER BY threshold LIMIT 40
     """,
     note=(
         "Precision and recall against ground truth, because every seeded "
@@ -340,8 +349,10 @@ Q_THRESHOLD_CALIBRATION = Query(
 
 Q_NODE_DETAIL = Query(
     sql="""
-        SELECT o.org_id, o.name, o.ein, o.city, o.state, o.cause,
-               r.risk_score, r.verdict, r.is_synthetic,
+        SELECT o.org_id, o.name, o.ein, o.city, o.state, o.cause, o.blurb,
+               o.is_synthetic, o.is_verified, o.synth_technique,
+               r.risk_score, r.verdict, r.semantic_sim, r.evasion_gap,
+               r.nearest_target_id, r.nearest_target_name,
                (SELECT COUNT(*) FROM MARTS.CLONE_PAIRS p
                  WHERE p.target_id = o.org_id) AS imitations_pointing_at_it
         FROM STAGING.ORGS o
@@ -349,14 +360,382 @@ Q_NODE_DETAIL = Query(
         WHERE o.org_id = ?
     """,
     local="""
-        SELECT o.org_id, o.name, o.ein, o.city, o.state, o.cause,
-               r.risk_score, r.verdict, o.is_synthetic,
+        SELECT o.org_id, o.name, o.ein, o.city, o.state, o.cause, o.blurb,
+               o.is_synthetic, o.is_verified, o.synth_technique,
+               r.risk_score, r.verdict, r.semantic_sim, r.evasion_gap,
+               r.nearest_target_id, r.nearest_target_name,
                (SELECT COUNT(*) FROM clone_pairs p
                  WHERE p.target_id = o.org_id) AS imitations_pointing_at_it
         FROM staging_orgs o
         LEFT JOIN org_risk r USING (org_id)
         WHERE o.org_id = ?
     """,
+    note=(
+        "A seeded node has no imitations pointing at it, it points at "
+        "something. Carrying the technique and the nearest target means the "
+        "inspector can say which of the two it is looking at rather than "
+        "reporting a zero and leaving the reader to guess."
+    ),
+)
+
+# ---------------------------------------------------------------------------
+# Trust lookup. Any organisation in the corpus, scored.
+#
+# THE SCORE IS NOT A NEW SCORE. Trust is 100 minus MARTS.F_RISK, the same
+# UDF Tab 01 decomposes into a waterfall. Introducing a second scoring
+# system to answer "how trusted is this one" would mean the application
+# carries two numbers that can disagree about the same organisation, and
+# the tab that exists to argue for legible scoring would be running an
+# illegible one.
+# ---------------------------------------------------------------------------
+
+Q_ORG_SEARCH = Query(
+    sql="""
+        SELECT org_id, name, ein, city, state, cause,
+               is_synthetic, is_verified, risk_score, verdict
+        FROM MARTS.ORG_RISK
+        WHERE UPPER(name) LIKE UPPER(?) OR ein LIKE ?
+        ORDER BY risk_score DESC, name
+        LIMIT 40
+    """,
+    local="""
+        SELECT org_id, name, ein, city, state, cause,
+               is_synthetic, is_verified, risk_score, verdict
+        FROM org_risk
+        WHERE UPPER(name) LIKE UPPER(?) OR ein LIKE ?
+        ORDER BY risk_score DESC, name
+        LIMIT 40
+    """,
+    note=(
+        "Ordered by score rather than alphabetically. A search over 45,400 "
+        "filings that returns forty alphabetical rows buries the one row "
+        "worth looking at."
+    ),
+)
+
+Q_ORG_TRUST_CONTEXT = Query(
+    sql="""
+        SELECT a.disbursements, a.districts, a.pledged_usd, a.moved_usd,
+               a.delivered_usd, a.unaccounted_usd, a.unaccounted_ratio,
+               a.delivery_rate,
+               c.eligible_disbursements, c.receipts_on_chain,
+               c.receipts_missing, c.receipt_coverage
+        FROM MARTS.ORG_RISK r
+        LEFT JOIN MARTS.DT_ORG_ACTIVITY      a ON a.org_id = r.org_id
+        LEFT JOIN MARTS.DT_RECEIPT_COVERAGE  c ON c.org_id = r.org_id
+        WHERE r.org_id = ?
+    """,
+    local="""
+        SELECT a.disbursements, a.districts, a.pledged_usd, a.moved_usd,
+               a.delivered_usd, a.unaccounted_usd, a.unaccounted_ratio,
+               a.delivery_rate,
+               c.eligible_disbursements, c.receipts_on_chain,
+               c.receipts_missing, c.receipt_coverage
+        FROM org_risk r
+        LEFT JOIN org_activity     a ON a.org_id = r.org_id
+        LEFT JOIN receipt_coverage c ON c.org_id = r.org_id
+        WHERE r.org_id = ?
+    """,
+    note=(
+        "What the score was computed from. A score with no evidence behind "
+        "it is the thing this project is against, so the lookup shows the "
+        "money and the receipts alongside the number."
+    ),
+)
+
+Q_ORG_TRUST_RANK = Query(
+    sql="""
+        SELECT COUNT(*)                                  AS population,
+               COUNT_IF(risk_score < ?)                  AS more_trusted,
+               COUNT_IF(risk_score = ?)                  AS same_score,
+               COUNT_IF(cause = ?)                       AS cause_population,
+               COUNT_IF(cause = ? AND risk_score < ?)    AS cause_more_trusted,
+               COUNT_IF(state = ?)                       AS state_population,
+               COUNT_IF(state = ? AND risk_score < ?)    AS state_more_trusted
+        FROM MARTS.ORG_RISK
+    """,
+    local="""
+        SELECT COUNT(*)                                          AS population,
+               COUNT(*) FILTER (WHERE risk_score < ?)            AS more_trusted,
+               COUNT(*) FILTER (WHERE risk_score = ?)            AS same_score,
+               COUNT(*) FILTER (WHERE cause = ?)                 AS cause_population,
+               COUNT(*) FILTER (WHERE cause = ? AND risk_score < ?)
+                                                                 AS cause_more_trusted,
+               COUNT(*) FILTER (WHERE state = ?)                 AS state_population,
+               COUNT(*) FILTER (WHERE state = ? AND risk_score < ?)
+                                                                 AS state_more_trusted
+        FROM org_risk
+    """,
+    note=(
+        "One pass over the mart returning seven counters, rather than three "
+        "PERCENT_RANK window functions over 45,400 rows to place a single "
+        "organisation. Params: (risk, risk, cause, cause, risk, state, "
+        "state, risk).\n\n"
+        "THE TIE COUNTER IS NOT OPTIONAL. 44,644 filings in this corpus "
+        "carry a clean zero because they have moved no money and have no "
+        "near neighbour, so a percentile would report a spotless "
+        "organisation as sitting above 1.6 per cent of the corpus. The "
+        "interface renders three counts instead: how many score higher, "
+        "how many score the same, how many score lower."
+    ),
+)
+
+Q_TRUST_BANDS = Query(
+    sql="""
+        SELECT FLOOR(risk_score / 5) * 5    AS risk_floor,
+               COUNT_IF(NOT is_synthetic)   AS real_filings,
+               COUNT_IF(is_synthetic)       AS seeded_rows
+        FROM MARTS.ORG_RISK
+        GROUP BY 1
+        ORDER BY 1
+        LIMIT 40
+    """,
+    local="""
+        SELECT FLOOR(risk_score / 5) * 5                    AS risk_floor,
+               COUNT(*) FILTER (WHERE NOT is_synthetic)     AS real_filings,
+               COUNT(*) FILTER (WHERE is_synthetic)         AS seeded_rows
+        FROM org_risk
+        GROUP BY 1
+        ORDER BY 1
+        LIMIT 40
+    """,
+    note=(
+        "Banded in SQL rather than shipped as 45,400 scores and binned in "
+        "pandas. Twenty rows cross the wire instead of a column that has to "
+        "be counted against the 32 MB transfer cap."
+    ),
+)
+
+Q_TRUST_INVARIANT = Query(
+    sql="""
+        SELECT COUNT(*)                                        AS orgs_scored,
+               COUNT_IF(NOT is_synthetic)                      AS real_filings,
+               COUNT_IF(is_synthetic)                          AS seeded_rows,
+               MAX(CASE WHEN NOT is_synthetic THEN risk_score END)
+                                                               AS highest_real_risk,
+               COUNT_IF(NOT is_synthetic
+                        AND verdict = 'needs a second look')    AS real_second_look,
+               COUNT_IF(is_synthetic
+                        AND verdict = 'needs a second look')    AS seeded_second_look
+        FROM MARTS.ORG_RISK
+    """,
+    local="""
+        SELECT COUNT(*)                                                AS orgs_scored,
+               COUNT(*) FILTER (WHERE NOT is_synthetic)                AS real_filings,
+               COUNT(*) FILTER (WHERE is_synthetic)                    AS seeded_rows,
+               MAX(CASE WHEN NOT is_synthetic THEN risk_score END)     AS highest_real_risk,
+               COUNT(*) FILTER (WHERE NOT is_synthetic
+                                AND verdict = 'needs a second look')   AS real_second_look,
+               COUNT(*) FILTER (WHERE is_synthetic
+                                AND verdict = 'needs a second look')   AS seeded_second_look
+        FROM org_risk
+    """,
+    note=(
+        "The safety property, asserted from the data rather than promised "
+        "in prose: real_second_look must be zero. If a real filing ever "
+        "crosses the second-look line, this application is publishing an "
+        "accusation about a named organisation and the tab says so."
+    ),
+)
+
+Q_TRUST_BY_COUNTRY = Query(
+    sql="""
+        SELECT dim.country                                              AS country,
+               COUNT(DISTINCT g.org_id)                                 AS orgs,
+               COUNT(*)                                                 AS disbursements,
+               SUM(g.amount_usd)                                        AS usd,
+               AVG(CASE WHEN g.geometry_verdict = 'PLAUSIBLE'
+                        THEN 1 ELSE 0 END)                              AS plausible_share,
+               DIV0(SUM(CASE WHEN g.status = 'UNACCOUNTED'
+                             THEN g.amount_usd ELSE 0 END),
+                    NULLIF(SUM(g.amount_usd), 0))                       AS unaccounted_share,
+               AVG(CASE WHEN m.asset_id IS NOT NULL
+                        THEN 1 ELSE 0 END)                              AS receipted_share,
+               100 - DIV0(SUM(g.amount_usd * r.risk_score),
+                          NULLIF(SUM(g.amount_usd), 0))                 AS trust_score,
+               COUNT(DISTINCT CASE WHEN r.verdict = 'needs a second look'
+                                   THEN g.org_id END)                   AS second_look_orgs
+        FROM MARTS.DELIVERY_GEOMETRY g
+        JOIN MARTS.DISTRICT_DIM dim ON dim.district = g.district
+        JOIN MARTS.ORG_RISK     r   ON r.org_id     = g.org_id
+        LEFT JOIN ORACLE.MINT_LOG m ON m.disbursement_id = g.disbursement_id
+        GROUP BY dim.country
+        ORDER BY usd DESC
+        LIMIT 20
+    """,
+    local="""
+        SELECT d.country                                                AS country,
+               COUNT(DISTINCT g.org_id)                                 AS orgs,
+               COUNT(*)                                                 AS disbursements,
+               SUM(g.amount_usd)                                        AS usd,
+               AVG(CASE WHEN g.geometry_verdict = 'PLAUSIBLE'
+                        THEN 1.0 ELSE 0 END)                            AS plausible_share,
+               SUM(CASE WHEN g.status = 'UNACCOUNTED'
+                        THEN g.amount_usd ELSE 0 END)
+                 / NULLIF(SUM(g.amount_usd), 0)                         AS unaccounted_share,
+               AVG(CASE WHEN m.asset_id IS NOT NULL
+                        THEN 1.0 ELSE 0 END)                            AS receipted_share,
+               100 - SUM(g.amount_usd * r.risk_score)
+                       / NULLIF(SUM(g.amount_usd), 0)                   AS trust_score,
+               COUNT(DISTINCT CASE WHEN r.verdict = 'needs a second look'
+                                   THEN g.org_id END)                   AS second_look_orgs
+        FROM delivery_geometry g
+        JOIN staging_disbursements d USING (disbursement_id)
+        JOIN org_risk r ON r.org_id = g.org_id
+        LEFT JOIN mint_log m ON m.disbursement_id = g.disbursement_id
+        GROUP BY d.country
+        ORDER BY usd DESC
+        LIMIT 20
+    """,
+    note=(
+        "The corridor view. The country is where the money LANDED, taken "
+        "from MARTS.DISTRICT_DIM, not where the organisation is registered: "
+        "every filing in this corpus is American and grouping them by "
+        "registration country would return one row. Trust is weighted by "
+        "dollars moved, so a corridor is judged by the money that went "
+        "through it rather than by a headcount of the bodies that touched it."
+    ),
+)
+
+Q_TRUST_BY_STATE = Query(
+    sql="""
+        SELECT state,
+               COUNT(*)                                          AS orgs,
+               COUNT_IF(is_synthetic)                            AS seeded,
+               COUNT_IF(NOT is_synthetic AND is_verified)        AS verified,
+               100.0 * COUNT_IF(is_synthetic)
+                 / NULLIF(COUNT_IF(NOT is_synthetic AND is_verified), 0)
+                                                                 AS imitations_per_100,
+               100 - AVG(risk_score)                             AS trust_score,
+               MIN(100 - risk_score)                             AS lowest_trust,
+               COUNT_IF(verdict = 'needs a second look')         AS second_look_orgs
+        FROM MARTS.ORG_RISK
+        WHERE state IS NOT NULL AND state <> ''
+        GROUP BY state
+        HAVING COUNT(*) >= 250
+        ORDER BY imitations_per_100 DESC
+        LIMIT 60
+    """,
+    local="""
+        SELECT state,
+               COUNT(*)                                          AS orgs,
+               COUNT(*) FILTER (WHERE is_synthetic)              AS seeded,
+               COUNT(*) FILTER (WHERE NOT is_synthetic AND is_verified)
+                                                                 AS verified,
+               100.0 * COUNT(*) FILTER (WHERE is_synthetic)
+                 / NULLIF(COUNT(*) FILTER (WHERE NOT is_synthetic AND is_verified), 0)
+                                                                 AS imitations_per_100,
+               100 - AVG(risk_score)                             AS trust_score,
+               MIN(100 - risk_score)                             AS lowest_trust,
+               COUNT(*) FILTER (WHERE verdict = 'needs a second look')
+                                                                 AS second_look_orgs
+        FROM org_risk
+        WHERE state IS NOT NULL AND state <> ''
+        GROUP BY state
+        HAVING COUNT(*) >= 250
+        ORDER BY imitations_per_100 DESC
+        LIMIT 60
+    """,
+    note=(
+        "The registration view, and the HAVING clause is the point of it. A "
+        "state with nine filings and one imitation reads as eleven per "
+        "hundred and tops any ranking that lets it in. The floor is 250 "
+        "filings, which is a denominator large enough for the rate to mean "
+        "something."
+    ),
+)
+
+Q_TRUST_LEADERBOARD = Query(
+    sql="""
+        SELECT r.org_id, r.name, r.city, r.state, r.cause,
+               100 - r.risk_score  AS trust_score,
+               a.disbursements, a.districts, a.moved_usd,
+               a.delivery_rate, a.unaccounted_ratio
+        FROM MARTS.ORG_RISK r
+        JOIN MARTS.DT_ORG_ACTIVITY a ON a.org_id = r.org_id
+        WHERE r.is_synthetic = FALSE
+          AND r.is_verified  = TRUE
+          AND a.disbursements >= 8
+        ORDER BY r.risk_score ASC, a.moved_usd DESC
+        LIMIT 10
+    """,
+    local="""
+        SELECT r.org_id, r.name, r.city, r.state, r.cause,
+               100 - r.risk_score  AS trust_score,
+               a.disbursements, a.districts, a.moved_usd,
+               a.delivery_rate, a.unaccounted_ratio
+        FROM org_risk r
+        JOIN org_activity a ON a.org_id = r.org_id
+        WHERE r.is_synthetic = FALSE
+          AND r.is_verified  = TRUE
+          AND a.disbursements >= 8
+        ORDER BY r.risk_score ASC, a.moved_usd DESC
+        LIMIT 10
+    """,
+    note=(
+        "A high score with no activity behind it is not trust, it is "
+        "absence of evidence, and 44,580 filings in this corpus have moved "
+        "no money at all and therefore score a clean zero. The eight "
+        "disbursement floor is what separates earned confidence from an "
+        "empty record."
+    ),
+)
+
+Q_TRUST_SECOND_LOOK = Query(
+    sql="""
+        SELECT r.org_id, r.name, r.city, r.state, r.cause,
+               r.is_synthetic, r.synth_technique,
+               r.risk_score, 100 - r.risk_score AS trust_score,
+               r.semantic_sim, r.evasion_gap, r.nearest_target_name
+        FROM MARTS.ORG_RISK r
+        WHERE r.verdict = 'needs a second look'
+        ORDER BY r.risk_score DESC
+        LIMIT 10
+    """,
+    local="""
+        SELECT r.org_id, r.name, r.city, r.state, r.cause,
+               r.is_synthetic, r.synth_technique,
+               r.risk_score, 100 - r.risk_score AS trust_score,
+               r.semantic_sim, r.evasion_gap, r.nearest_target_name
+        FROM org_risk r
+        WHERE r.verdict = 'needs a second look'
+        ORDER BY r.risk_score DESC
+        LIMIT 10
+    """,
+    note=(
+        "Every row this returns is seeded by construction. That is asserted "
+        "by Q_TRUST_INVARIANT rather than assumed, and the tab renders the "
+        "assertion beside the table."
+    ),
+)
+
+Q_MOST_IMPERSONATED = Query(
+    sql="""
+        SELECT target_id, target_name, cause, state,
+               COUNT(*)           AS imitations,
+               AVG(semantic_sim)  AS mean_similarity,
+               MAX(evasion_gap)   AS max_evasion_gap
+        FROM MARTS.CLONE_PAIRS
+        GROUP BY target_id, target_name, cause, state
+        ORDER BY imitations DESC, mean_similarity DESC
+        LIMIT 8
+    """,
+    local="""
+        SELECT target_id, target_name, cause, state,
+               COUNT(*)           AS imitations,
+               AVG(semantic_sim)  AS mean_similarity,
+               MAX(evasion_gap)   AS max_evasion_gap
+        FROM clone_pairs
+        GROUP BY target_id, target_name, cause, state
+        ORDER BY imitations DESC, mean_similarity DESC
+        LIMIT 8
+    """,
+    note=(
+        "Naming these organisations is safe and it is the humane framing: "
+        "they are the targets, not the suspects. It also gives the network "
+        "graph a keyboard route to its hubs, which clicking a seven pixel "
+        "marker does not."
+    ),
 )
 
 
@@ -391,6 +770,8 @@ Q_GEOMETRY_KPI = Query(
     sql="""
         SELECT COUNT(*)                                                AS events,
                COUNT(DISTINCT delivery_h3)                             AS cells,
+               COUNT(DISTINCT district)                                AS districts,
+               COUNT(DISTINCT org_id)                                  AS orgs,
                SUM(amount_usd)                                         AS usd_traced,
                COUNT_IF(geometry_verdict = 'OUTSIDE_FOOTPRINT')        AS outside_footprint,
                COUNT_IF(geometry_verdict = 'IMPOSSIBLE_TRANSIT')       AS impossible_transit,
@@ -400,6 +781,8 @@ Q_GEOMETRY_KPI = Query(
     local="""
         SELECT COUNT(*)                        AS events,
                COUNT(DISTINCT delivery_h3)     AS cells,
+               COUNT(DISTINCT district)        AS districts,
+               COUNT(DISTINCT org_id)          AS orgs,
                SUM(amount_usd)                 AS usd_traced,
                COUNT(*) FILTER (WHERE geometry_verdict = 'OUTSIDE_FOOTPRINT')  AS outside_footprint,
                COUNT(*) FILTER (WHERE geometry_verdict = 'IMPOSSIBLE_TRANSIT') AS impossible_transit,
@@ -407,6 +790,192 @@ Q_GEOMETRY_KPI = Query(
                  / COUNT(*)                    AS implausible_share
         FROM delivery_geometry
     """,
+)
+
+Q_DELIVERY_FLOWS = Query(
+    sql="""
+        SELECT g.disbursement_id, g.org_id, g.org_name, g.district,
+               g.amount_usd, g.status, g.geometry_verdict,
+               g.km_from_base,
+               o.city  AS origin_city,
+               o.state AS origin_state,
+               o.lat   AS origin_lat,
+               o.lon   AS origin_lon,
+               g.lat   AS dest_lat,
+               g.lon   AS dest_lon
+        FROM MARTS.DELIVERY_GEOMETRY g
+        JOIN STAGING.ORGS o ON o.org_id = g.org_id
+        WHERE o.lat IS NOT NULL AND o.lon IS NOT NULL
+          AND g.lat IS NOT NULL AND g.lon IS NOT NULL
+        LIMIT 9000
+    """,
+    local="""
+        SELECT g.disbursement_id, g.org_id, g.org_name, g.district,
+               g.amount_usd, g.status, g.geometry_verdict,
+               g.km_from_base,
+               o.city  AS origin_city,
+               o.state AS origin_state,
+               o.lat   AS origin_lat,
+               o.lon   AS origin_lon,
+               g.lat   AS dest_lat,
+               g.lon   AS dest_lon
+        FROM delivery_geometry g
+        JOIN staging_orgs o ON o.org_id = g.org_id
+        WHERE o.lat IS NOT NULL AND o.lon IS NOT NULL
+          AND g.lat IS NOT NULL AND g.lon IS NOT NULL
+        LIMIT 9000
+    """,
+    note=(
+        "One query, two map layers. The arc layer draws the origin and "
+        "destination columns, the scatter layer draws the destination "
+        "columns only, and running one statement for both means the two "
+        "views cannot show different totals.\n\n"
+        "The origin is the REGISTERED ADDRESS, not the operating base. "
+        "That is the point of the picture: money leaves an American filing "
+        "address and lands in Rafah or Kassala, which is what an "
+        "international NGO does and is not on its own a finding. The "
+        "footprint test, which is what a finding comes from, is a grid "
+        "distance from the DECLARED BASE and is computed in "
+        "sql/08_geospatial_h3.sql, not here.\n\n"
+        "8,545 rows by fourteen columns is roughly a megabyte, comfortably "
+        "inside the 32 MB transfer cap (Trap 07). The LIMIT is the guard "
+        "that keeps it that way if the corpus grows."
+    ),
+)
+
+Q_DISTRICT_TOTALS = Query(
+    sql="""
+        SELECT g.district,
+               dim.country,
+               COUNT(*)                     AS deliveries,
+               COUNT(DISTINCT g.org_id)     AS orgs,
+               SUM(g.amount_usd)            AS usd,
+               AVG(CASE WHEN g.geometry_verdict <> 'PLAUSIBLE'
+                        THEN 1 ELSE 0 END)  AS flag_rate,
+               SUM(CASE WHEN g.status = 'DELIVERED'
+                        THEN g.amount_usd ELSE 0 END)   AS delivered_usd,
+               SUM(CASE WHEN g.status = 'UNACCOUNTED'
+                        THEN g.amount_usd ELSE 0 END)   AS unaccounted_usd,
+               COUNT(m.asset_id)            AS receipts_on_chain,
+               AVG(g.lat)                   AS centroid_lat,
+               AVG(g.lon)                   AS centroid_lon
+        FROM MARTS.DELIVERY_GEOMETRY g
+        JOIN MARTS.DISTRICT_DIM dim ON dim.district = g.district
+        LEFT JOIN ORACLE.MINT_LOG m ON m.disbursement_id = g.disbursement_id
+        GROUP BY g.district, dim.country
+        ORDER BY usd DESC
+        LIMIT 40
+    """,
+    local="""
+        SELECT g.district,
+               ANY_VALUE(d.country)         AS country,
+               COUNT(*)                     AS deliveries,
+               COUNT(DISTINCT g.org_id)     AS orgs,
+               SUM(g.amount_usd)            AS usd,
+               AVG(CASE WHEN g.geometry_verdict <> 'PLAUSIBLE'
+                        THEN 1.0 ELSE 0 END) AS flag_rate,
+               SUM(CASE WHEN g.status = 'DELIVERED'
+                        THEN g.amount_usd ELSE 0 END)   AS delivered_usd,
+               SUM(CASE WHEN g.status = 'UNACCOUNTED'
+                        THEN g.amount_usd ELSE 0 END)   AS unaccounted_usd,
+               COUNT(m.asset_id)            AS receipts_on_chain,
+               AVG(g.lat)                   AS centroid_lat,
+               AVG(g.lon)                   AS centroid_lon
+        FROM delivery_geometry g
+        JOIN staging_disbursements d USING (disbursement_id)
+        LEFT JOIN mint_log m ON m.disbursement_id = g.disbursement_id
+        GROUP BY g.district
+        ORDER BY usd DESC
+        LIMIT 40
+    """,
+    note="Where the money actually landed, one row per district.",
+)
+
+Q_MONEY_OVER_TIME = Query(
+    sql="""
+        SELECT DATE_TRUNC('week', dispatched_at)                       AS week,
+               COUNT(*)                                                AS events,
+               SUM(amount_usd)                                         AS dispatched_usd,
+               SUM(CASE WHEN status = 'DELIVERED'
+                        THEN amount_usd ELSE 0 END)                    AS delivered_usd,
+               SUM(CASE WHEN status = 'UNACCOUNTED'
+                        THEN amount_usd ELSE 0 END)                    AS unaccounted_usd,
+               SUM(CASE WHEN geometry_verdict <> 'PLAUSIBLE'
+                        THEN amount_usd ELSE 0 END)                    AS flagged_usd
+        FROM MARTS.DELIVERY_GEOMETRY
+        WHERE dispatched_at IS NOT NULL
+        GROUP BY 1
+        ORDER BY 1
+        LIMIT 200
+    """,
+    local="""
+        SELECT DATE_TRUNC('week', dispatched_at)                       AS week,
+               COUNT(*)                                                AS events,
+               SUM(amount_usd)                                         AS dispatched_usd,
+               SUM(CASE WHEN status = 'DELIVERED'
+                        THEN amount_usd ELSE 0 END)                    AS delivered_usd,
+               SUM(CASE WHEN status = 'UNACCOUNTED'
+                        THEN amount_usd ELSE 0 END)                    AS unaccounted_usd,
+               SUM(CASE WHEN geometry_verdict <> 'PLAUSIBLE'
+                        THEN amount_usd ELSE 0 END)                    AS flagged_usd
+        FROM delivery_geometry
+        WHERE dispatched_at IS NOT NULL
+        GROUP BY 1
+        ORDER BY 1
+        LIMIT 200
+    """,
+    note=(
+        "Weekly, not daily. Eighteen weeks of dispatches read as a shape; "
+        "a hundred and twenty days of them read as noise, and the tab is "
+        "making a point about accumulation rather than about any one day."
+    ),
+)
+
+Q_PROGRAMME_FLOW = Query(
+    sql="""
+        SELECT programme_code,
+               COUNT(*)                                                  AS events,
+               COUNT(DISTINCT district)                                  AS districts,
+               COUNT(DISTINCT org_id)                                    AS orgs,
+               SUM(amount_usd)                                           AS usd,
+               SUM(CASE WHEN status = 'DELIVERED'
+                        THEN amount_usd ELSE 0 END)                      AS delivered_usd,
+               SUM(CASE WHEN status = 'DISPATCHED'
+                        THEN amount_usd ELSE 0 END)                      AS in_flight_usd,
+               SUM(CASE WHEN status = 'UNACCOUNTED'
+                        THEN amount_usd ELSE 0 END)                      AS unaccounted_usd,
+               SUM(CASE WHEN status = 'PLEDGED'
+                        THEN pledged_usd ELSE 0 END)                     AS pledged_only_usd
+        FROM STAGING.DISBURSEMENTS
+        GROUP BY programme_code
+        ORDER BY usd DESC
+        LIMIT 20
+    """,
+    local="""
+        SELECT programme_code,
+               COUNT(*)                                                  AS events,
+               COUNT(DISTINCT district)                                  AS districts,
+               COUNT(DISTINCT org_id)                                    AS orgs,
+               SUM(amount_usd)                                           AS usd,
+               SUM(CASE WHEN status = 'DELIVERED'
+                        THEN amount_usd ELSE 0 END)                      AS delivered_usd,
+               SUM(CASE WHEN status = 'DISPATCHED'
+                        THEN amount_usd ELSE 0 END)                      AS in_flight_usd,
+               SUM(CASE WHEN status = 'UNACCOUNTED'
+                        THEN amount_usd ELSE 0 END)                      AS unaccounted_usd,
+               SUM(CASE WHEN status = 'PLEDGED'
+                        THEN pledged_usd ELSE 0 END)                     AS pledged_only_usd
+        FROM staging_disbursements
+        GROUP BY programme_code
+        ORDER BY usd DESC
+        LIMIT 20
+    """,
+    note=(
+        "Programme codes are the appeal a donation was given to. Four "
+        "statuses, and the difference between DISPATCHED and UNACCOUNTED "
+        "is the difference between money in transit and money nobody can "
+        "account for. Collapsing them would flatter the numbers."
+    ),
 )
 
 Q_VERDICT_COMPOSITION = Query(

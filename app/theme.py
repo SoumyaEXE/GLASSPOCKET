@@ -243,6 +243,13 @@ header[data-testid="stHeader"] {
 .gp-chip-chain     { background: #F3EAFF; color: #6D25C4; border-color: #DFC9FA; }
 .gp-chip-confirmed { background: #E8F6EC; color: #10702F; border-color: #BFE5CA; }
 .gp-chip-neutral   { background: #F7F8FA; color: #4B5563; border-color: #E4E7EB; }
+/* A file path is not a label token. It keeps its own casing, because
+   sql/07_clone_detection.sql upper-cased is no longer a path. */
+.gp-chip-file {
+  background: #F7F8FA; color: #4B5563; border-color: #E4E7EB;
+  text-transform: none; letter-spacing: 0; font-weight: 500;
+  font-size: 11px; font-feature-settings: 'tnum' 1;
+}
 
 /* ---------------------------- comparison cards -------------------- */
 .gp-card {
@@ -516,9 +523,14 @@ hr { border: none; border-top: 1px solid #E4E7EB; margin: 32px 0; }
 }
 .gp-panel-tight { padding: 16px 18px 8px 18px; }
 .gp-panel-head {
-  display: flex; align-items: baseline; justify-content: space-between;
+  display: flex; align-items: center; justify-content: space-between;
   gap: 12px; margin-bottom: 14px;
+  /* A chip is taller than a label token. Reserving the chip's height on
+     every head keeps two side-by-side panels on the same internal grid
+     whether or not either of them carries one. */
+  min-height: 26px;
 }
+.gp-panel-note-slot { display: flex; align-items: center; }
 .gp-panel-title {
   font-size: 13px; font-weight: 650; letter-spacing: -0.01em; color: #08090B;
 }
@@ -565,6 +577,124 @@ div[data-testid="stSegmentedControl"] button[kind="segmented_controlActive"] {
 /* Streamlit stacks 1rem between every element in a column. Inside a
    panel that reads as a hole, so blocks tagged as compact close it. */
 .gp-compact + div [data-testid="stVerticalBlock"] { gap: 0.4rem; }
+
+/* ------------------------------ static table ---------------------- */
+/* st.dataframe truncates any cell it cannot fit. On a tab whose entire
+   argument is that the figures are quotable, a truncated quotation is
+   the one thing that cannot be allowed, so the cited-source list is a
+   plain table that wraps instead. */
+.gp-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.gp-table th {
+  text-align: left; font-size: 10px; font-weight: 600; letter-spacing: 0.11em;
+  text-transform: uppercase; color: #9CA3AF; padding: 0 14px 8px 14px;
+  border-bottom: 1px solid #E4E7EB; vertical-align: bottom;
+}
+.gp-table td {
+  padding: 13px 14px; border-bottom: 1px solid #F0F2F4;
+  vertical-align: top; line-height: 1.55; color: #16181D;
+}
+/* A row that is shaded needs its text to clear the shading, and the
+   marker rule on a differing row has to be part of the box rather than
+   painted over it: an inset shadow sat on top of the first cell's own
+   text. The transparent border on every other row keeps the first
+   column on one vertical line whether the row is marked or not. */
+.gp-table th:first-child,
+.gp-table td:first-child {
+  border-left: 3px solid transparent; padding-left: 11px;
+}
+.gp-table tr:last-child td { border-bottom: none; }
+.gp-table td.gp-td-muted { color: #6B7280; }
+.gp-table td.gp-td-nowrap { white-space: nowrap; color: #6B7280; }
+.gp-table a { color: #0E7FA8; text-decoration: underline; }
+.gp-table-scroll { overflow-x: auto; }
+/* The record diff on Tab 01. A field that matches is muted so the eye
+   goes straight to the two that do not, which is the whole finding. */
+/* Not qualified with td: the caller wraps a cell value in a span so the
+   shading and the emphasis can sit on the value rather than the cell. */
+.gp-table .gp-td-field {
+  display: inline-block; padding-top: 2px;
+  font-size: 11px; font-weight: 600; letter-spacing: 0.09em;
+  text-transform: uppercase; color: #9CA3AF; white-space: nowrap;
+}
+.gp-table .gp-td-same { color: #9CA3AF; }
+.gp-table .gp-td-diff { color: #08090B; font-weight: 600; }
+.gp-table tr.gp-tr-diff td { background: #FDF4F4; }
+.gp-table tr.gp-tr-diff td:first-child { border-left-color: #E5484D; }
+
+/* ======================================================================
+   TAB 01 / the choice
+   ================================================================== */
+
+/* Both comparison cards must be exactly the same height whatever the
+   mission line says, or the taller one reads as the important one and
+   the test is over before it starts. */
+.gp-card-choice { min-height: 156px; }
+
+/* The action slot under each card. It holds a button before the reveal
+   and a verdict after it, and it reserves its own height either way so
+   the two columns never shift relative to one another. */
+.gp-slot { min-height: 34px; display: flex; align-items: center; gap: 8px;
+           margin: 10px 0 2px 0; }
+.gp-slot-pick {
+  font-size: 11px; font-weight: 600; letter-spacing: 0.09em;
+  text-transform: uppercase; color: #08090B;
+}
+
+/* The result callout. One line, full width, stated plainly. */
+.gp-verdict {
+  border: 1px solid #E4E7EB; border-left: 3px solid #6B7280;
+  border-radius: 6px; padding: 14px 18px; background: #FFFFFF;
+}
+.gp-verdict-right { border-left-color: #17A34A; background: #F7FCF8; }
+.gp-verdict-wrong { border-left-color: #E5484D; background: #FEF8F8; }
+.gp-verdict-title {
+  font-size: 15px; font-weight: 650; letter-spacing: -0.015em; color: #08090B;
+}
+.gp-verdict-body {
+  font-size: 13px; color: #4B5563; line-height: 1.6; margin-top: 5px;
+  max-width: 76ch;
+}
+
+/* A figure and its label, sitting under a chart inside a panel. */
+.gp-readout { display: flex; gap: 28px; flex-wrap: wrap; margin-top: 4px; }
+.gp-readout-item { min-width: 96px; }
+.gp-readout-v {
+  font-size: 20px; font-weight: 700; letter-spacing: -0.03em; color: #08090B;
+  font-feature-settings: 'tnum' 1;
+}
+.gp-readout-v-flag { color: #B02427; }
+.gp-readout-k {
+  font-size: 10px; font-weight: 600; letter-spacing: 0.11em;
+  text-transform: uppercase; color: #9CA3AF; margin-top: 3px;
+}
+
+/* ------------------------------------------------------------------
+   Tab 02. Ranked tables of figures, and the trust bands.
+   ------------------------------------------------------------------ */
+
+/* Figures right-align on a tabular rail. The class sits on the heading
+   as well as on the cell, or the column reads as two columns. */
+.gp-table th.gp-td-num,
+.gp-table td.gp-td-num {
+  text-align: right; white-space: nowrap;
+  font-feature-settings: 'tnum' 1;
+}
+.gp-table td.gp-td-num { color: #08090B; font-weight: 600; }
+.gp-table .gp-td-rank {
+  display: inline-block; min-width: 20px;
+  font-size: 11px; font-weight: 700; color: #9CA3AF;
+  font-feature-settings: 'tnum' 1;
+}
+.gp-table .gp-td-where {
+  display: block; font-size: 11px; color: #9CA3AF; margin-top: 3px;
+}
+.gp-table .gp-td-lead { color: #08090B; font-weight: 600; }
+
+/* A row of controls that has to sit on the panel's own baseline. */
+.gp-control-label {
+  font-size: 10px; font-weight: 600; letter-spacing: 0.11em;
+  text-transform: uppercase; color: #9CA3AF; margin: 0 0 6px 0;
+}
 """
 
 

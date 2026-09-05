@@ -24,6 +24,13 @@ PARAMS = {
     "Q_ORG_RISK_ONE": ("ORG_900000000",),
     "Q_PROJECTION": ("disaster relief",),
     "Q_NODE_DETAIL": ("ORG_900000000",),
+    # The Tab 02 trust lookup. Passed real-shaped arguments rather than
+    # empty ones, because an empty LIKE pattern proves the statement
+    # parses and proves nothing about whether it answers.
+    "Q_ORG_SEARCH": ("%children%", "917%"),
+    "Q_ORG_TRUST_CONTEXT": ("ORG_900000000",),
+    "Q_ORG_TRUST_RANK": (44.5, 44.5, "disaster relief", "disaster relief",
+                         44.5, "NY", "NY", 44.5),
     "Q_CELL_DRILLDOWN": ("872db6382ffffff",),
     "Q_RECEIPT_LOOKUP": ("none",),
     "Q_TIME_TRAVEL": ("ORG_900000000", "ORG_900000000"),

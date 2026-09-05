@@ -14,6 +14,7 @@ monospaced typeface appears anywhere in the application.
 from __future__ import annotations
 
 import base64
+import contextlib
 import html
 from typing import Iterable, Sequence
 
@@ -28,6 +29,11 @@ from theme import MAX_WIDTH  # noqa: F401  (re-exported for tab modules)
 
 def _esc(value) -> str:
     return html.escape(str(value), quote=True)
+
+
+#: Public alias. A tab that composes its own cell markup for C.table
+#: still has to escape the values it puts inside it.
+escape = _esc
 
 
 def usd(value: float, *, precise: bool = False) -> str:
@@ -201,6 +207,16 @@ def chip(text: str, tone: str = "neutral") -> str:
     return f'<span class="gp-chip gp-chip-{tone}">{_esc(text)}</span>'
 
 
+def file_chip(path: str) -> str:
+    """A repository path as a chip, in its own casing.
+
+    ``chip`` upper-cases its text, which is right for a label token and
+    wrong for sql/07_clone_detection.sql: upper-cased it is no longer a
+    path.
+    """
+    return f'<span class="gp-chip gp-chip-file">{_esc(path)}</span>'
+
+
 def chips(items: Iterable[tuple[str, str]]) -> None:
     st.markdown(
         " ".join(chip(text, tone) for text, tone in items), unsafe_allow_html=True
@@ -311,6 +327,7 @@ def org_card(
     state: str,
     blurb: str,
     reveal: str | None = None,
+    equal_height: bool = False,
 ) -> None:
     """Comparison card for Tab 01.
 
@@ -318,7 +335,7 @@ def org_card(
     before the reveal. Do not colour, badge or shade the seeded one at
     that stage. Resist the urge.
     """
-    klass = "gp-card"
+    klass = "gp-card gp-card-choice" if equal_height else "gp-card"
     if reveal == "verified":
         klass += " gp-card-reveal-verified gp-reveal"
     elif reveal == "seeded":
@@ -361,14 +378,23 @@ def svg(markup: str, *, alt: str = "") -> None:
                 unsafe_allow_html=True)
 
 
-def panel_head(title: str, note: str = "") -> None:
+def panel_head(title: str, note: str = "", *, note_html: str = "") -> None:
     """Title row for a bordered container.
 
     Pairs with st.container(border=True). Two columns holding different
     kinds of content only read as one row if both wear the same frame and
     label it the same way.
+
+    ``note_html`` takes already-rendered markup, so a status chip can sit
+    in the same slot as the label token. That matters for alignment: an
+    extra row inside one panel and not the other puts the two panels'
+    figures on different lines even when the panels themselves end
+    together.
     """
-    note_html = f'<div class="gp-panel-note">{_esc(note)}</div>' if note else ""
+    if note_html:
+        note_html = f'<div class="gp-panel-note-slot">{note_html}</div>'
+    else:
+        note_html = f'<div class="gp-panel-note">{_esc(note)}</div>' if note else ""
     st.markdown(
         f'<div class="gp-panel-head">'
         f'<div class="gp-panel-title">{_esc(title)}</div>{note_html}</div>',
@@ -389,3 +415,137 @@ def kv_rows(items: Sequence[tuple[str, str]]) -> None:
 def note(text: str) -> None:
     """A paragraph of explanation, held to a readable measure."""
     st.markdown(f'<div class="gp-note">{text}</div>', unsafe_allow_html=True)
+
+
+def table(
+    columns: Sequence[tuple[str, str]],
+    rows: Sequence[Sequence],
+    *,
+    widths: Sequence[str] | None = None,
+    row_classes: Sequence[str] | None = None,
+) -> None:
+    """A static table that wraps.
+
+    ``columns`` is a sequence of (heading, css class) pairs; a cell whose
+    value is already marked safe by the caller passes through, everything
+    else is escaped. Used for the cited sources on Tab 00, where a
+    truncated quotation would undercut the entire tab.
+
+    The markup is emitted as one line on purpose. A blank line inside a
+    block of HTML ends the block as far as the markdown parser is
+    concerned, and everything after it comes back on the page as escaped
+    source. See ``svg`` for the same trap.
+    """
+    cols = (
+        "<colgroup>"
+        + "".join(f'<col style="width:{w}"/>' for w in widths)
+        + "</colgroup>"
+        if widths else ""
+    )
+    # The column class rides on the heading too. A right-aligned figures
+    # column whose heading stays left-aligned reads as two columns.
+    #
+    # Built by concatenation rather than by nesting a quoted attribute
+    # inside an f-string expression. Backslash escapes inside f-string
+    # braces are a SyntaxError before Python 3.12, and Streamlit in
+    # Snowflake pins its own interpreter.
+    head = "".join(
+        "<th" + (' class="' + cls + '"' if cls else "") + ">"
+        + _esc(name) + "</th>"
+        for name, cls in columns
+    )
+    body = []
+    classes = list(row_classes or []) + [""] * len(rows)
+    for row, row_class in zip(rows, classes):
+        cells = []
+        for (_name, cls), value in zip(columns, row):
+            klass = f' class="{cls}"' if cls else ""
+            cells.append(f"<td{klass}>{value}</td>")
+        tr = f'<tr class="{row_class}">' if row_class else "<tr>"
+        body.append(tr + "".join(cells) + "</tr>")
+    st.markdown(
+        '<div class="gp-table-scroll"><table class="gp-table">'
+        + cols
+        + "<thead><tr>"
+        + head
+        + "</tr></thead><tbody>"
+        + "".join(body)
+        + "</tbody></table></div>",
+        unsafe_allow_html=True,
+    )
+
+
+def link(url: str, text: str = "source") -> str:
+    """An external link, or a muted dash when the URL is not recorded.
+
+    Six of the seven citations have no canonical URL in the warehouse.
+    They render as an explicit absence rather than as a dead link,
+    because inventing one would defeat the point of the tab.
+    """
+    if not url:
+        return '<span style="color:#9CA3AF">not recorded</span>'
+    return f'<a href="{_esc(url)}" target="_blank" rel="noopener">{_esc(text)}</a>'
+
+
+@contextlib.contextmanager
+def panel():
+    """A bordered container, or a plain one where border is unsupported.
+
+    st.container gained ``border`` in Streamlit 1.29. Streamlit in
+    Snowflake pins its own version and it is not ours to choose, so the
+    keyword is offered and the plain container is taken if it is
+    refused. Losing a border degrades the layout; raising a TypeError
+    takes the whole tab down, and this build has already spent a day on
+    that class of failure.
+    """
+    try:
+        box = st.container(border=True)
+    except TypeError:                        # pragma: no cover
+        box = st.container()
+    with box:
+        yield
+
+
+def readout(items: Sequence[tuple[str, str]], *, flag: str | None = None) -> None:
+    """A row of figures with label tokens beneath, no border.
+
+    Sits under a chart inside a panel, where a stat_band's own frame
+    would be a second box drawn inside the first one. ``flag`` names the
+    one label that should be rendered in Flag Red.
+    """
+    cells = "".join(
+        f'<div class="gp-readout-item">'
+        f'<div class="gp-readout-v{" gp-readout-v-flag" if k == flag else ""}">'
+        f"{_esc(v)}</div>"
+        f'<div class="gp-readout-k">{_esc(k)}</div></div>'
+        for v, k in items
+    )
+    st.markdown(f'<div class="gp-readout">{cells}</div>', unsafe_allow_html=True)
+
+
+def verdict(title: str, body: str, tone: str = "neutral") -> None:
+    """The result callout after a choice has been made.
+
+    Bold markdown was doing this job and it read as an afterthought
+    rather than as the answer to the question the tab just asked.
+    """
+    klass = {
+        "right": "gp-verdict gp-verdict-right",
+        "wrong": "gp-verdict gp-verdict-wrong",
+    }.get(tone, "gp-verdict")
+    st.markdown(
+        f'<div class="{klass}"><div class="gp-verdict-title">{_esc(title)}</div>'
+        f'<div class="gp-verdict-body">{_esc(body)}</div></div>',
+        unsafe_allow_html=True,
+    )
+
+
+def slot(inner_html: str = "") -> None:
+    """A fixed-height row under a card.
+
+    Holds a button before the reveal and a verdict chip after it. It
+    reserves its height either way, so the two comparison columns never
+    shift relative to one another when one of them changes.
+    """
+    st.markdown(f'<div class="gp-slot">{inner_html}</div>',
+                unsafe_allow_html=True)

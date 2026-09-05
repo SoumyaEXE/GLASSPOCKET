@@ -116,7 +116,8 @@ def bare_config(*, static: bool = False) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def meaning_vs_spelling(semantic: float, string: float) -> go.Figure:
+def meaning_vs_spelling(semantic: float, string: float,
+                        *, height: int = 220) -> go.Figure:
     """Grouped horizontal bar. The single most quotable image in the build.
 
     Two bars, semantic similarity in Snowflake Blue and string similarity
@@ -155,9 +156,18 @@ def meaning_vs_spelling(semantic: float, string: float) -> go.Figure:
         xanchor="left", xshift=10,
         font=dict(family=FONT, size=13, color=FLAG_RED),
     )
-    fig.update_xaxes(range=[0, 1.12], dtick=0.25, showgrid=False)
-    fig.update_yaxes(autorange="reversed")
-    return style_fig(fig, height=260)
+    fig = style_fig(fig, height=height)
+    # style_fig merges its own xaxis, yaxis and margin into the layout, so
+    # anything set before it is silently overwritten. Style first, then
+    # override. The right-hand headroom is where the gap label sits; with
+    # a 0.97 bar and no headroom it is clipped by the plotting area.
+    fig.update_xaxes(range=[0, 1.34], dtick=0.25, showgrid=True,
+                     gridcolor="#F0F2F4",
+                     tickfont=dict(family=FONT, size=12, color=TEXT_MUTED))
+    fig.update_yaxes(autorange="reversed", showgrid=False,
+                     tickfont=dict(family=FONT, size=13, color=TEXT))
+    fig.update_layout(margin=dict(l=8, r=8, t=16, b=8))
+    return fig
 
 
 # ---------------------------------------------------------------------------
@@ -165,12 +175,20 @@ def meaning_vs_spelling(semantic: float, string: float) -> go.Figure:
 # ---------------------------------------------------------------------------
 
 
-def risk_waterfall(components: dict[str, float], total: float) -> go.Figure:
+def risk_waterfall(components: dict[str, float], total: float,
+                   *, height: int = 300) -> go.Figure:
     """Waterfall reconstructing the risk score by hand.
 
     An accountability tool cannot show an opaque score, so this chart
-    exists to make the arithmetic reconstructable by eye. Contributions in
-    Flag Red, total bar in ink.
+    exists to make the arithmetic reconstructable by eye. Contributions
+    in Flag Red, total bar in ink.
+
+    IT RUNS HORIZONTALLY BECAUSE THE COMPONENT NAMES ARE PHRASES. Five
+    labels reading "semantic proximity", "unaccounted ratio" and
+    "missing receipts" cannot sit side by side under a vertical
+    waterfall in a half-width column without colliding, and Plotly's
+    answer to that collision is to rotate them, which is worse. Turned on
+    its side the labels are a left-hand column and read straight.
     """
     labels = list(components.keys()) + ["total"]
     values = list(components.values()) + [total]
@@ -178,10 +196,10 @@ def risk_waterfall(components: dict[str, float], total: float) -> go.Figure:
 
     fig = go.Figure(
         go.Waterfall(
-            orientation="v",
+            orientation="h",
             measure=measures,
-            x=labels,
-            y=values,
+            y=labels,
+            x=values,
             text=[f"{v:.1f}" for v in values],
             textposition="outside",
             textfont=dict(family=FONT, size=12, color=TEXT),
@@ -189,11 +207,55 @@ def risk_waterfall(components: dict[str, float], total: float) -> go.Figure:
             increasing=dict(marker=dict(color=FLAG_RED)),
             decreasing=dict(marker=dict(color=SNOWFLAKE_BLUE)),
             totals=dict(marker=dict(color=INK)),
-            hovertemplate="%{x}: %{y:.2f}<extra></extra>",
+            hovertemplate="%{y}: %{x:.2f}<extra></extra>",
         )
     )
-    fig.update_yaxes(range=[0, max(105, total * 1.2)])
-    return style_fig(fig, height=340)
+    fig = style_fig(fig, height=height)
+    fig.update_xaxes(range=[0, max(100.0, float(total)) * 1.18],
+                     showgrid=True, gridcolor="#F0F2F4", dtick=25,
+                     tickfont=dict(family=FONT, size=12, color=TEXT_MUTED))
+    fig.update_yaxes(autorange="reversed", showgrid=False,
+                     tickfont=dict(family=FONT, size=12, color=TEXT))
+    fig.update_layout(margin=dict(l=8, r=8, t=14, b=8))
+    return fig
+
+
+def evasion_distribution(gaps, marker: float, *, height: int = 300):
+    """Where one pair sits in the whole confirmed population.
+
+    A single pair showing an evasion gap of 0.27 means nothing on its
+    own: the reader has no idea whether that is ordinary or extreme. The
+    histogram supplies the missing denominator, and the marker says
+    where the pair on screen falls in it. This is the difference between
+    reporting a number and reporting a finding.
+    """
+    values = [float(v) for v in gaps]
+    below = sum(1 for v in values if v <= float(marker))
+    percentile = 100.0 * below / max(len(values), 1)
+
+    fig = go.Figure()
+    fig.add_histogram(
+        x=values, nbinsx=26,
+        marker=dict(color="#DCE1E6", line=dict(width=0)),
+        hovertemplate="gap %{x:.2f}: %{y} pairs<extra></extra>",
+        name="confirmed pairs",
+    )
+    fig = style_fig(fig, height=height)
+    fig.add_vline(x=float(marker), line=dict(color=FLAG_RED, width=2))
+    fig.add_annotation(
+        x=float(marker), y=1.0, yref="paper", yanchor="bottom",
+        text=f"this pair &#183; {percentile:.0f}th percentile",
+        showarrow=False, xanchor="right" if percentile > 60 else "left",
+        xshift=-6 if percentile > 60 else 6,
+        font=dict(family=FONT, size=12, color=FLAG_RED),
+    )
+    fig.update_xaxes(title=None, showgrid=True, gridcolor="#F0F2F4",
+                     tickformat=".2f",
+                     tickfont=dict(family=FONT, size=12, color=TEXT_MUTED))
+    fig.update_yaxes(showgrid=True, gridcolor="#F0F2F4",
+                     tickfont=dict(family=FONT, size=12, color=TEXT_MUTED))
+    fig.update_layout(margin=dict(l=8, r=8, t=30, b=8), bargap=0.06)
+    return fig
 
 
 # ---------------------------------------------------------------------------
@@ -201,7 +263,8 @@ def risk_waterfall(components: dict[str, float], total: float) -> go.Figure:
 # ---------------------------------------------------------------------------
 
 
-def semantic_neighbourhood(df, selected_pair: tuple[str, str] | None = None):
+def semantic_neighbourhood(df, selected_pair: tuple[str, str] | None = None,
+                           *, height: int = 380):
     """Two-dimensional PCA projection of the embedding space.
 
     Verified are Neutral dots, imitations are Flag Red, the selected pair
@@ -241,15 +304,32 @@ def semantic_neighbourhood(df, selected_pair: tuple[str, str] | None = None):
                 line=dict(color=INK, width=1.5, dash="dot"),
                 marker=dict(size=13, color=INK, line=dict(width=2, color="#FFFFFF")),
                 text=pair["name"],
-                textposition="top center",
+                # One label above and one below. Both organisation names
+                # are long and the two markers sit almost on top of each
+                # other by construction, so a single position puts one
+                # label straight through the other.
+                textposition=["top center", "bottom center"],
                 textfont=dict(family=FONT, size=12, color=INK),
                 name="selected pair",
+                cliponaxis=False,
                 hoverinfo="skip",
             )
 
-    fig.update_xaxes(visible=False)
-    fig.update_yaxes(visible=False)
-    return style_fig(fig, height=380, legend=True)
+    fig = style_fig(fig, height=height, legend=True)
+    # The axes carry no meaning here, but the range does: an organisation
+    # name is forty characters wide and the two labelled markers sit near
+    # the middle of the cloud, so without padding the label runs off the
+    # edge of the figure and is cut in half.
+    span_x = float(df["pc1"].max() - df["pc1"].min()) or 1.0
+    span_y = float(df["pc2"].max() - df["pc2"].min()) or 1.0
+    fig.update_xaxes(visible=False,
+                     range=[float(df["pc1"].min()) - span_x * 0.34,
+                            float(df["pc1"].max()) + span_x * 0.34])
+    fig.update_yaxes(visible=False,
+                     range=[float(df["pc2"].min()) - span_y * 0.12,
+                            float(df["pc2"].max()) + span_y * 0.12])
+    fig.update_layout(margin=dict(l=8, r=8, t=8, b=8))
+    return fig
 
 
 # ---------------------------------------------------------------------------
@@ -257,12 +337,30 @@ def semantic_neighbourhood(df, selected_pair: tuple[str, str] | None = None):
 # ---------------------------------------------------------------------------
 
 
-def impersonation_network(nodes, edges):
+def impersonation_network(nodes, edges, *, focus_id: str | None = None,
+                          height: int = 452):
     """Force-style graph built from plain Plotly traces.
 
     Third-party network components cannot load under the Content Security
     Policy (Trap 03), so the graph is drawn from primitives. Positions
     come from an offline networkx spring layout stored on MARTS.GRAPH_NODES.
+
+    EVERY NODE IS SIZED BY ITS DEGREE, which is the whole reason to draw
+    a graph rather than a table. At a fixed radius every node looked
+    equally involved and the hubs were invisible.
+
+    Degree does not mean the same thing on both sides and the tab says
+    so rather than papering over it. On a verified organisation it is how
+    many imitations point at it, which in this corpus is one for almost
+    all of them and two for a handful. On a seeded row it is how many
+    real organisations that one name sits close enough to, and one seeded
+    row reaches seventeen of them. Calling the size "imitations" would
+    have been a clean label and a false one.
+
+    The axes are locked to the same scale. A spring layout is only
+    meaningful if one unit across is one unit down, and letting the
+    container stretch x independently turns a symmetric layout into an
+    ellipse that implies structure the data does not have.
     """
     fig = go.Figure()
 
@@ -274,69 +372,484 @@ def impersonation_network(nodes, edges):
             edge_y += [row.source_y, row.target_y, None]
         fig.add_scatter(
             x=edge_x, y=edge_y, mode="lines",
-            line=dict(color="rgba(107,114,128,0.28)", width=0.8),
+            line=dict(color="rgba(107,114,128,0.30)", width=0.8),
             hoverinfo="skip", showlegend=False,
         )
 
     verified = nodes[nodes["node_kind"] == "verified"]
     imitation = nodes[nodes["node_kind"] == "imitation"]
 
+    # One scale across both kinds, so a big marker means the same amount
+    # of graph wherever it appears.
+    top = float(nodes["degree"].fillna(0).astype(float).max() or 1.0)
+
+    def _sizes(frame, base: float, span: float):
+        if not len(frame):
+            return []
+        degree = frame["degree"].fillna(0).astype(float).clip(lower=0)
+        return base + span * (degree / top) ** 0.55
+
     fig.add_scatter(
         x=verified["x"], y=verified["y"], mode="markers",
-        marker=dict(size=14, color=SNOWFLAKE_BLUE,
-                    line=dict(width=1.5, color="#FFFFFF")),
-        name="verified",
-        customdata=verified[["org_id", "name", "cause", "city", "state"]],
+        marker=dict(size=_sizes(verified, 9.0, 15.0), color=SNOWFLAKE_BLUE,
+                    line=dict(width=1.4, color="#FFFFFF")),
+        name="verified organisation",
+        customdata=verified[["org_id", "name", "cause", "city", "state",
+                             "degree"]],
         hovertemplate="<b>%{customdata[1]}</b><br>%{customdata[2]}"
-                      "<br>%{customdata[3]}, %{customdata[4]}<extra></extra>",
+                      "<br>%{customdata[3]}, %{customdata[4]}"
+                      "<br>%{customdata[5]} imitation(s) point at it"
+                      "<extra></extra>",
     )
     fig.add_scatter(
         x=imitation["x"], y=imitation["y"], mode="markers",
-        marker=dict(size=7, color=FLAG_RED,
+        marker=dict(size=_sizes(imitation, 5.0, 15.0), color=FLAG_RED,
                     line=dict(width=1, color="#FFFFFF")),
         name="seeded imitation",
-        customdata=imitation[["org_id", "name", "cause", "city", "state"]],
+        customdata=imitation[["org_id", "name", "cause", "city", "state",
+                              "degree"]],
         hovertemplate="<b>%{customdata[1]}</b><br>%{customdata[2]}"
-                      "<br>%{customdata[3]}, %{customdata[4]}<extra></extra>",
+                      "<br>%{customdata[3]}, %{customdata[4]}"
+                      "<br>sits close to %{customdata[5]} real organisation(s)"
+                      "<extra></extra>",
     )
 
-    fig = style_fig(fig, height=460, legend=True)
-    return no_axes(fig)
+    # The selected node gets a ring rather than a colour change, so the
+    # verified/seeded reading of the palette is never overloaded.
+    if focus_id is not None and len(nodes):
+        hit = nodes[nodes["org_id"] == focus_id]
+        if len(hit):
+            fig.add_scatter(
+                x=hit["x"], y=hit["y"], mode="markers",
+                marker=dict(size=30, color="rgba(0,0,0,0)",
+                            line=dict(width=2, color=INK)),
+                hoverinfo="skip", showlegend=False,
+            )
+
+    fig = style_fig(fig, height=height, legend=True)
+    fig = no_axes(fig)
+    fig.update_yaxes(scaleanchor="x", scaleratio=1)
+    fig.update_layout(margin=dict(l=4, r=4, t=34, b=4))
+    return fig
 
 
 # ---------------------------------------------------------------------------
-# C02-3 / Threshold sensitivity
+# C02-3 / Threshold sensitivity and calibration
 # ---------------------------------------------------------------------------
 
 
-def threshold_curve(df, marker_at: float = 0.86) -> go.Figure:
-    """Two lines over the precomputed sweep, with the production value marked.
+def threshold_curve(df, marker_at: float, production: float,
+                    *, height: int = 300) -> go.Figure:
+    """Detections against the cut-off, on a log axis.
 
-    It shows the threshold was chosen rather than guessed, and lets a
-    sceptical judge probe the model live instead of taking a number on
-    faith. The curve is precomputed so the slider responds with no query.
+    THE Y AXIS IS LOGARITHMIC BECAUSE THE RANGE IS FOUR ORDERS OF
+    MAGNITUDE. The sweep runs from 27,212 pairs at 0.70 to 52 at 0.99. On
+    a linear axis everything from 0.86 upward is pinned to the floor and
+    the production end of the curve, which is the only part anyone is
+    deciding anything about, reads as a flat line at zero.
+
+    The confirmed-pairs series that used to sit on this chart has been
+    removed. AI_FILTER is unavailable on this account, so confirmation
+    was computed once, at the production cut-off, and plotting it across
+    the sweep drew a horizontal line at 188 that looked like a finding
+    and was an artefact. What actually justifies the threshold is
+    precision and recall against ground truth, which is the panel beside
+    this one.
     """
     fig = go.Figure()
     fig.add_scatter(
         x=df["threshold"], y=df["pairs_detected"], mode="lines",
-        line=dict(color=SNOWFLAKE_BLUE, width=2.5),
+        line=dict(color=SNOWFLAKE_BLUE, width=2.5, shape="spline"),
+        fill="tozeroy", fillcolor="rgba(41,181,232,0.10)",
         name="pairs detected",
-        hovertemplate="threshold %{x:.2f}: %{y} pairs<extra></extra>",
+        hovertemplate="cut-off %{x:.2f}: %{y:,} pairs<extra></extra>",
     )
-    fig.add_scatter(
-        x=df["threshold"], y=df["pairs_ai_confirmed"], mode="lines",
-        line=dict(color=SOLANA_PURPLE, width=2, dash="dot"),
-        name="also confirmed by the AI predicate",
-        hovertemplate="threshold %{x:.2f}: %{y} confirmed<extra></extra>",
-    )
+    fig = style_fig(fig, height=height)
+    # dtick=1 on a log axis is one decade per tick. Without it Plotly
+    # labels the minor ticks too and the axis reads 2, 10k, 5, 1000, 5.
+    fig.update_yaxes(type="log", dtick=1, title=dict(
+        text="pairs detected, log scale",
+        font=dict(family=FONT, size=11, color=TEXT_MUTED)))
+    fig.update_xaxes(dtick=0.05, showgrid=False)
     fig.add_vline(
-        x=marker_at, line=dict(color=INK, width=1.5, dash="dash"),
-        annotation_text=f"production {marker_at:.2f}",
-        annotation_position="top",
-        annotation_font=dict(family=FONT, size=12, color=INK),
+        x=production, line=dict(color=INK, width=1.5, dash="dash"),
+        annotation_text=f"production {production:.2f}",
+        annotation_position="top left",
+        annotation_font=dict(family=FONT, size=11, color=INK),
     )
-    fig.update_xaxes(title=None, dtick=0.05)
-    return style_fig(fig, height=320, legend=True)
+    if abs(float(marker_at) - float(production)) > 0.004:
+        fig.add_vline(
+            x=marker_at, line=dict(color=FLAG_RED, width=1.5),
+            annotation_text=f"you are at {marker_at:.2f}",
+            annotation_position="top right",
+            annotation_font=dict(family=FONT, size=11, color=FLAG_RED),
+        )
+    return fig
+
+
+def threshold_calibration(df, marker_at: float, production: float,
+                          *, height: int = 300) -> go.Figure:
+    """Precision, recall and F1 against ground truth.
+
+    Every seeded organisation records the real one it was built from, so
+    a detected pair can be checked rather than believed. This is the
+    chart that says the cut-off was chosen: it is not at the F1 maximum,
+    and the tab says why not.
+    """
+    precision = [float(v or 0) for v in df["precision_at"]]
+    recall = [float(v or 0) for v in df["recall_at"]]
+    f1 = [
+        0.0 if (p + r) == 0 else 2 * p * r / (p + r)
+        for p, r in zip(precision, recall)
+    ]
+
+    fig = go.Figure()
+    for name, series, colour, dash in (
+        ("precision", precision, CONFIRMED_GREEN, "solid"),
+        ("recall", recall, NOISE_AMBER, "solid"),
+        ("F1", f1, NEUTRAL, "dot"),
+    ):
+        fig.add_scatter(
+            x=df["threshold"], y=series, mode="lines",
+            line=dict(color=colour, width=2.5 if dash == "solid" else 2,
+                      dash=dash),
+            name=name,
+            hovertemplate="cut-off %{x:.2f}: " + name + " %{y:.3f}<extra></extra>",
+        )
+    fig = style_fig(fig, height=height, legend=True)
+    fig.update_yaxes(range=[0, 1.08], tickformat=".0%")
+    fig.update_xaxes(dtick=0.05, showgrid=False)
+
+    if f1:
+        best = max(range(len(f1)), key=lambda i: f1[i])
+        fig.add_vline(
+            x=float(df["threshold"].iloc[best]),
+            line=dict(color=NEUTRAL, width=1, dash="dot"),
+            annotation_text=f"F1 peaks at {float(df['threshold'].iloc[best]):.2f}",
+            annotation_position="bottom left",
+            annotation_font=dict(family=FONT, size=11, color=TEXT_MUTED),
+        )
+    fig.add_vline(
+        x=production, line=dict(color=INK, width=1.5, dash="dash"),
+        annotation_text=f"production {production:.2f}",
+        annotation_position="top left",
+        annotation_font=dict(family=FONT, size=11, color=INK),
+    )
+    if abs(float(marker_at) - float(production)) > 0.004:
+        fig.add_vline(x=marker_at, line=dict(color=FLAG_RED, width=1.5))
+    return fig
+
+
+# ---------------------------------------------------------------------------
+# C02-4 / Trust. The score any organisation carries, and where it falls.
+#
+# TRUST IS 100 MINUS MARTS.F_RISK. There is no second scoring system in
+# this application; these charts render the published UDF from the other
+# direction because a donor asks "can I trust this one", not "what is
+# this one's risk component vector".
+# ---------------------------------------------------------------------------
+
+#: Trust bands, high to low. The 45 boundary is not decorative: it is
+#: 100 minus the 55 at which MARTS.ORG_RISK writes 'needs a second look',
+#: so the red band on every gauge is exactly the verdict in the mart.
+TRUST_BANDS = (
+    (90.0, 100.0, "#EAF7FD", SNOWFLAKE_BLUE, "strong"),
+    (65.0, 90.0, "#F7F8FA", NEUTRAL, "ordinary"),
+    (45.0, 65.0, "#FEF6E7", NOISE_AMBER, "thin"),
+    (0.0, 45.0, "#FDECEC", FLAG_RED, "needs a second look"),
+)
+
+
+def trust_band(score: float) -> tuple[str, str]:
+    """(label, chip tone) for a trust score. One definition, used everywhere."""
+    value = float(score or 0)
+    for low, _high, _fill, _ink, label in TRUST_BANDS:
+        if value >= low:
+            return label, {
+                "strong": "verified",
+                "ordinary": "neutral",
+                "thin": "seeded",
+                "needs a second look": "flagged",
+            }[label]
+    return "needs a second look", "flagged"
+
+
+def trust_gauge(score: float, *, comparison: float | None = None,
+                comparison_label: str = "corpus median",
+                height: int = 132) -> go.Figure:
+    """A banded 0-100 rule with the score marked on it.
+
+    A bare number is not a judgement. 72 means nothing until the reader
+    can see that the second-look line is at 45 and that most of the
+    corpus sits above 90, so the bands are drawn rather than described.
+    """
+    value = max(0.0, min(100.0, float(score or 0)))
+    fig = go.Figure()
+
+    # A transparent trace so the axes exist; the bands are shapes.
+    fig.add_scatter(x=[value], y=[0], mode="markers",
+                    marker=dict(size=0.1, color="rgba(0,0,0,0)"),
+                    hoverinfo="skip", showlegend=False)
+    fig = style_fig(fig, height=height)
+
+    for low, high, fill, _ink, label in TRUST_BANDS:
+        fig.add_shape(type="rect", x0=low, x1=high, y0=-0.34, y1=0.34,
+                      line=dict(width=0), fillcolor=fill, layer="below")
+        fig.add_annotation(
+            x=(low + high) / 2, y=-0.40, yanchor="top", text=label,
+            showarrow=False,
+            font=dict(family=FONT, size=10, color=TEXT_MUTED),
+        )
+
+    if comparison is not None:
+        fig.add_shape(type="line", x0=float(comparison), x1=float(comparison),
+                      y0=-0.34, y1=0.34,
+                      line=dict(color=TEXT_MUTED, width=1.5, dash="dot"))
+        fig.add_annotation(
+            x=float(comparison), y=0.42, yanchor="bottom",
+            text=comparison_label, showarrow=False,
+            font=dict(family=FONT, size=10, color=TEXT_MUTED),
+        )
+
+    _label, tone = trust_band(value)
+    ink = {"verified": SNOWFLAKE_BLUE, "neutral": INK,
+           "seeded": NOISE_AMBER, "flagged": FLAG_RED}[tone]
+    fig.add_shape(type="line", x0=value, x1=value, y0=-0.46, y1=0.46,
+                  line=dict(color=ink, width=3))
+    fig.add_annotation(
+        x=value, y=0.52, yanchor="bottom", text=f"<b>{value:.1f}</b>",
+        showarrow=False, font=dict(family=FONT, size=15, color=ink),
+    )
+
+    fig.update_xaxes(range=[0, 100], tickvals=[0, 25, 50, 75, 100],
+                     showgrid=False, zeroline=False, linecolor=BORDER)
+    fig.update_yaxes(range=[-0.95, 0.95], visible=False)
+    fig.update_layout(margin=dict(l=8, r=8, t=26, b=8))
+    return fig
+
+
+def trust_bands_chart(df, *, highest_real: float | None = None,
+                      height: int = 320) -> go.Figure:
+    """Where every organisation in the corpus falls, real against seeded.
+
+    THIS IS THE SAFETY PROPERTY DRAWN RATHER THAN PROMISED. The blue
+    series stops before the second-look line and the red series is
+    everything past it, which is the same statement Q_TRUST_INVARIANT
+    makes in counters. If the two ever overlapped past 45 this
+    application would be publishing an accusation about a named real
+    organisation, and the chart would show it before any prose did.
+
+    The count axis is logarithmic. 44,644 filings sit in the top band and
+    four seeded rows sit beside them; on a linear axis the entire seeded
+    distribution, which is the subject of the tab, is a flat smear.
+    """
+    trust_mid = [100.0 - (float(v) + 2.5) for v in df["risk_floor"]]
+    fig = go.Figure()
+    fig.add_bar(
+        x=trust_mid, y=[int(v) for v in df["real_filings"]],
+        name="real filings", marker=dict(color=SNOWFLAKE_BLUE),
+        hovertemplate="trust %{x:.0f}: %{y:,} real filings<extra></extra>",
+    )
+    fig.add_bar(
+        x=trust_mid, y=[int(v) for v in df["seeded_rows"]],
+        name="seeded imitations", marker=dict(color=FLAG_RED),
+        hovertemplate="trust %{x:.0f}: %{y:,} seeded<extra></extra>",
+    )
+    fig = style_fig(fig, height=height, legend=True)
+    fig.update_layout(barmode="overlay", bargap=0.12)
+    fig.update_traces(opacity=0.85)
+    fig.update_yaxes(type="log", dtick=1, title=dict(
+        text="organisations, log scale",
+        font=dict(family=FONT, size=11, color=TEXT_MUTED)))
+    fig.update_xaxes(range=[0, 102], dtick=10, autorange=False, title=dict(
+        text="trust score",
+        font=dict(family=FONT, size=11, color=TEXT_MUTED)))
+    fig.add_vline(
+        x=45, line=dict(color=INK, width=1.5, dash="dash"),
+        annotation_text="second-look line",
+        annotation_position="top left",
+        annotation_font=dict(family=FONT, size=11, color=INK),
+    )
+    if highest_real is not None:
+        fig.add_vline(
+            x=100.0 - float(highest_real),
+            line=dict(color=SNOWFLAKE_BLUE, width=1.5, dash="dot"),
+            annotation_text="lowest real filing",
+            annotation_position="bottom right",
+            annotation_font=dict(family=FONT, size=11, color=SNOWFLAKE_BLUE),
+        )
+    return fig
+
+
+def corridor_components(df, *, height: int = 300) -> go.Figure:
+    """Three shares per corridor as a dot plot rather than grouped bars.
+
+    Grouped bars for three series over five categories is fifteen
+    rectangles competing for the same baseline. What a reader wants here
+    is the spread within each row, and dots on a shared rule give it
+    directly.
+    """
+    labels = list(df["label"])
+    fig = go.Figure()
+    for name, column, colour in (
+        ("geometry plausible", "plausible_share", SNOWFLAKE_BLUE),
+        ("accounted for", "accounted_share", CONFIRMED_GREEN),
+        ("receipt on chain", "receipted_share", SOLANA_PURPLE),
+    ):
+        fig.add_scatter(
+            x=[float(v or 0) for v in df[column]], y=labels,
+            mode="markers", name=name,
+            marker=dict(size=13, color=colour,
+                        line=dict(width=1.5, color="#FFFFFF")),
+            hovertemplate="%{y} &#183; " + name + " %{x:.1%}<extra></extra>",
+        )
+    fig = style_fig(fig, height=height, legend=True)
+    fig.update_yaxes(autorange="reversed")
+    fig.update_xaxes(range=[0, 1.02], tickformat=".0%", showgrid=True,
+                     gridcolor="#F0F2F4", dtick=0.25)
+    return fig
+
+
+def geography_scatter(df, *, label_top: int = 12,
+                      height: int = 340) -> go.Figure:
+    """Imitation pressure against mean trust, one bubble per state.
+
+    Two rankings side by side answer "which is worst at each" and nothing
+    else. Plotted against one another they answer whether the two
+    failures travel together, which is the question worth asking, and in
+    this corpus they do not: the seeding is uniform by construction and
+    the scatter shows that honestly instead of implying a pattern.
+
+    ONLY THE FIRST ``label_top`` ROWS CARRY A LABEL. The frame arrives
+    ordered by pressure, so those are exactly the states named in the bar
+    chart beside this one: the bar names them, the scatter places them.
+    Labelling all twenty-six put nine two-letter codes on top of each
+    other in the middle of the cluster, which is where the interesting
+    thing is, and a rule that picks a subset has to be a rule rather than
+    a taste.
+    """
+    sizes = [float(v) for v in df["orgs"]]
+    top = max(sizes or [1.0])
+    labels = [
+        str(name) if n < label_top else ""
+        for n, name in enumerate(df["state"])
+    ]
+    fig = go.Figure()
+    fig.add_scatter(
+        x=[float(v or 0) for v in df["imitations_per_100"]],
+        y=[float(v or 0) for v in df["trust_score"]],
+        mode="markers+text",
+        text=labels,
+        textposition="top center",
+        textfont=dict(family=FONT, size=10, color=TEXT_MUTED),
+        cliponaxis=False,
+        marker=dict(
+            size=[10 + 26 * (v / top) ** 0.5 for v in sizes],
+            color=SNOWFLAKE_BLUE, opacity=0.55,
+            line=dict(width=1.2, color="#FFFFFF"),
+        ),
+        # The state rides in customdata rather than in ``text``, because
+        # the unlabelled bubbles have no text and would otherwise hover
+        # as an anonymous bold nothing.
+        customdata=df[["orgs", "seeded", "second_look_orgs", "state"]],
+        hovertemplate="<b>%{customdata[3]}</b><br>%{customdata[0]:,} filings"
+                      "<br>%{customdata[1]} seeded"
+                      "<br>%{x:.2f} imitations per 100 verified"
+                      "<br>mean trust %{y:.2f}<extra></extra>",
+    )
+    fig = style_fig(fig, height=height)
+    fig.update_xaxes(title=dict(
+        text="imitations per 100 verified filings",
+        font=dict(family=FONT, size=11, color=TEXT_MUTED)),
+        showgrid=True, gridcolor="#F0F2F4")
+    fig.update_yaxes(title=dict(
+        text="mean trust score",
+        font=dict(family=FONT, size=11, color=TEXT_MUTED)))
+    return fig
+
+
+# ---------------------------------------------------------------------------
+# C03-4 / Money in motion, C03-5 / Programme flow
+#
+# THE FOUR STATUSES ARE NEVER COLLAPSED. Delivered, in flight and
+# unaccounted are three different things, and a chart that adds the first
+# two together and calls the result progress is the chart this whole
+# project exists to argue against. Pledged-but-never-dispatched is a
+# fourth, and it is a different measure from the other three, so it is
+# reported in the table rather than stacked into the same bar.
+# ---------------------------------------------------------------------------
+
+
+def money_over_time(df, *, height: int = 300) -> go.Figure:
+    """Cumulative dollars traced, split by where they ended up.
+
+    The three bands stack to the total because the three statuses
+    partition it exactly: every dispatched dollar is delivered, still in
+    flight, or unaccounted for. Money that was pledged and never
+    dispatched carries no amount at all and is therefore not in this
+    chart; it is in the programme table, where it can be named as the
+    separate thing it is.
+    """
+    weeks = list(df["week"])
+    delivered, in_flight, unaccounted = [], [], []
+    d_run = f_run = u_run = 0.0
+    for row in df.itertuples():
+        total = float(row.dispatched_usd or 0)
+        deliv = float(row.delivered_usd or 0)
+        unacc = float(row.unaccounted_usd or 0)
+        d_run += deliv
+        u_run += unacc
+        f_run += max(total - deliv - unacc, 0.0)
+        delivered.append(d_run)
+        in_flight.append(f_run)
+        unaccounted.append(u_run)
+
+    fig = go.Figure()
+    for name, series, colour in (
+        ("delivered", delivered, CONFIRMED_GREEN),
+        ("still in flight", in_flight, SNOWFLAKE_BLUE),
+        ("unaccounted", unaccounted, FLAG_RED),
+    ):
+        fig.add_scatter(
+            x=weeks, y=series, mode="lines", name=name,
+            stackgroup="one",
+            line=dict(width=1.5, color=colour),
+            fillcolor=colour,
+            opacity=0.85,
+            hovertemplate="%{x|%d %b}: " + name + " $%{y:,.0f}<extra></extra>",
+        )
+    fig = style_fig(fig, height=height, legend=True)
+    fig.update_layout(legend_traceorder="normal")
+    fig.update_yaxes(tickprefix="$", separatethousands=True, title=dict(
+        text="cumulative dollars traced",
+        font=dict(family=FONT, size=11, color=TEXT_MUTED)))
+    fig.update_xaxes(showgrid=False, tickformat="%d %b")
+    return fig
+
+
+def programme_flow(df, *, height: int = 300) -> go.Figure:
+    """One stacked bar per appeal, split by where the money ended up."""
+    fig = go.Figure()
+    for name, column, colour in (
+        ("delivered", "delivered_usd", CONFIRMED_GREEN),
+        ("still in flight", "in_flight_usd", SNOWFLAKE_BLUE),
+        ("unaccounted", "unaccounted_usd", FLAG_RED),
+    ):
+        fig.add_bar(
+            y=list(df["programme_code"]),
+            x=[float(v or 0) for v in df[column]],
+            orientation="h", name=name,
+            marker=dict(color=colour),
+            hovertemplate="%{y}<br>" + name + " $%{x:,.0f}<extra></extra>",
+        )
+    fig = style_fig(fig, height=height, legend=True)
+    # A horizontal stack reads left to right, so the legend has to as
+    # well. Plotly's default reverses it to match vertical stacking.
+    fig.update_layout(barmode="stack", bargap=0.36, legend_traceorder="normal")
+    fig.update_yaxes(autorange="reversed")
+    fig.update_xaxes(tickprefix="$", separatethousands=True, showgrid=True,
+                     gridcolor="#F0F2F4")
+    return fig
 
 
 # ---------------------------------------------------------------------------
@@ -374,11 +887,22 @@ def distance_histogram(df, cutoff_km: float) -> go.Figure:
     return style_fig(fig, height=300, legend=True)
 
 
+#: Verdict labels as English. The column holds database enum values
+#: and the legend is read by people, not by the parser.
+VERDICT_LABELS = {
+    "PLAUSIBLE": "plausible",
+    "OUTSIDE_FOOTPRINT": "outside footprint",
+    "IMPOSSIBLE_TRANSIT": "impossible transit",
+    "NEVER_ARRIVED": "never arrived",
+}
+
+
 def verdict_donut(df, centre_value: str) -> go.Figure:
     """Four segments, centre carries value at risk."""
     fig = go.Figure(
         go.Pie(
-            labels=df["geometry_verdict"],
+            labels=[VERDICT_LABELS.get(str(v), str(v).replace("_", " ").lower())
+                    for v in df["geometry_verdict"]],
             values=df["events"],
             hole=0.62,
             sort=False,
@@ -687,53 +1211,49 @@ def value_history(df) -> go.Figure:
 
 
 def evidence_timeline(df) -> go.Figure:
-    """Cited incidents on a dated lane chart, one lane per region.
+    """Cited incidents on a dated chart, one row per citation.
 
-    The first version of this was a bubble field with the y-axis hidden.
-    It looked like a chart and carried almost nothing: no reader could
-    tell what the vertical position meant, what the sizes were relative
-    to, or when anything happened without hovering every marker. A figure
-    on a tab arguing for legible evidence has to survive being read in a
-    screenshot, so:
+    Two earlier versions of this were wrong in instructive ways.
 
-      * lanes are labelled, and the axis says the label is a region;
-      * the date axis is visible, because when these things happened is
-        half the argument;
-      * every marker carries its own figure in words, so the chart is
-        readable with no pointer anywhere near it;
-      * marker area still scales WITHIN a unit type only. Tonnes and
-        dollars are not comparable and sizing them against each other
-        would be the exact sloppiness this tab objects to.
+    The first hid the y-axis and let the markers float, so the vertical
+    position meant nothing a reader could name and nothing was legible
+    without hovering. The second gave each region a lane, which fixed the
+    axis but not the collisions: three of the seven United States
+    citations were published inside nineteen days, so on any date scale
+    that also shows a 2023 incident they land on top of each other.
+
+    One row per citation is the version that works. Nothing can collide,
+    the row label carries the claim, the marker carries the figure in
+    words, and colour still groups the rows by region. The chart is
+    readable in a screenshot with no pointer anywhere near it, which is
+    the bar for every figure on this tab.
+
+    Marker area scales WITHIN a unit type only. Tonnes and dollars are
+    not comparable and sizing them against each other would be the exact
+    sloppiness this tab objects to.
     """
-    regions = list(dict.fromkeys(df["region"]))
     fig = go.Figure()
 
-    # A rule down each lane. Without it the markers float and the eye has
-    # nothing to read the horizontal position against.
-    for idx in range(len(regions)):
+    # A rule along each row, so the horizontal position is read against
+    # something rather than against empty space.
+    for row_index in range(len(df)):
         fig.add_shape(
             type="line", xref="paper", x0=0, x1=1,
-            yref="y", y0=idx, y1=idx,
+            yref="y", y0=row_index, y1=row_index,
             line=dict(color="#F0F2F4", width=1), layer="below",
         )
 
-    annotated = {"BFOREAI_LA_FIRES", "WFP_GAZA_TRUCKS"}
+    regions = list(dict.fromkeys(df["region"]))
     for idx, region in enumerate(regions):
         sub = df[df["region"] == region]
-        # The two pinned annotations below would collide with their own
-        # marker labels, so those points carry no inline text.
-        text = [
-            "" if cid in annotated else lab
-            for cid, lab in zip(sub["citation_id"], sub["label"])
-        ]
         fig.add_scatter(
-            x=sub["published_on"], y=sub["lane"], mode="markers+text",
+            x=sub["published_on"], y=sub["row"], mode="markers+text",
             marker=dict(
                 size=sub["marker_size"],
                 color=CATEGORICAL[idx % len(CATEGORICAL)],
                 opacity=0.9, line=dict(width=1.5, color="#FFFFFF"),
             ),
-            text=text, textposition="middle right",
+            text=sub["label"], textposition="middle right",
             textfont=dict(family=FONT, size=12, color=TEXT),
             cliponaxis=False,
             name=region,
@@ -744,34 +1264,16 @@ def evidence_timeline(df) -> go.Figure:
             ),
         )
 
-    # Two annotations pinned permanently, per the specification.
-    for cid, text, shift in (
-        ("BFOREAI_LA_FIRES", "119 lookalike domains in six days", -46),
-        ("WFP_GAZA_TRUCKS", "590 trucks moved, 371 collected", 46),
-    ):
-        row = df[df["citation_id"] == cid]
-        if len(row):
-            row = row.iloc[0]
-            fig.add_annotation(
-                x=row["published_on"], y=row["lane"], text=text,
-                showarrow=True, arrowhead=2, arrowsize=1, arrowwidth=1,
-                arrowcolor=TEXT_MUTED,
-                font=dict(family=FONT, size=12, color=INK),
-                ay=shift, ax=0, bgcolor="rgba(255,255,255,0.94)",
-                bordercolor=BORDER, borderwidth=1, borderpad=5,
-            )
+    # style_fig merges its own xaxis, yaxis and margin into the layout,
+    # so anything set before it is silently overwritten. Style first.
+    fig = style_fig(fig, height=max(300, 44 * len(df) + 80), legend=True)
 
-    # style_fig merges its own xaxis and yaxis dicts into the layout, so
-    # anything set before it is silently overwritten. Style first, then
-    # override.
-    fig = style_fig(fig, height=300)
-
-    # Padding on both ends so the first marker is not glued to the axis
-    # and the last one's label has somewhere to sit.
+    # Room at both ends: the first marker should not touch the axis, and
+    # the last one's label needs somewhere to sit.
     span = df["published_on"].max() - df["published_on"].min()
     fig.update_xaxes(
-        range=[df["published_on"].min() - span * 0.08,
-               df["published_on"].max() + span * 0.20],
+        range=[df["published_on"].min() - span * 0.06,
+               df["published_on"].max() + span * 0.17],
         showgrid=True, gridcolor="#F0F2F4", tickformat="%b %Y",
         tickfont=dict(family=FONT, size=12, color=TEXT_MUTED),
         ticks="outside", ticklen=4, tickcolor=BORDER,
@@ -779,9 +1281,10 @@ def evidence_timeline(df) -> go.Figure:
     fig.update_yaxes(
         visible=True, showgrid=False, showline=False, ticks="",
         tickmode="array",
-        tickvals=list(range(len(regions))), ticktext=regions,
+        tickvals=list(df["row"]), ticktext=list(df["row_label"]),
         tickfont=dict(family=FONT, size=12, color=TEXT),
-        range=[len(regions) - 0.55, -0.55],   # first region at the top
+        range=[len(df) - 0.5, -0.5],   # oldest citation at the top
+        automargin=True,
     )
     fig.update_layout(margin=dict(l=8, r=8, t=16, b=8))
     return fig
@@ -896,7 +1399,7 @@ def horizontal_bar(labels, values, *, colour=SNOWFLAKE_BLUE, height=280,
     return fig
 
 
-def schema_inventory(df) -> go.Figure:
+def schema_inventory(df, height: int | None = None) -> go.Figure:
     """Objects per schema, split by what kind of object each one is.
 
     A single bar of "14 objects" says less than it looks like it does.
@@ -919,8 +1422,12 @@ def schema_inventory(df) -> go.Figure:
             marker=dict(color=colour),
             hovertemplate="%{y}: %{x} " + name + "<extra></extra>",
         )
-    fig = style_fig(fig, height=max(240, 34 * len(df) + 76), legend=True)
-    fig.update_layout(barmode="stack", bargap=0.42)
+    fig = style_fig(fig, height=height or max(240, 34 * len(df) + 76),
+                    legend=True)
+    # Plotly lists a stacked legend in reverse so it matches the stacking
+    # order top-down; here the bars are horizontal, so normal order is
+    # the one that matches what the eye reads left to right.
+    fig.update_layout(barmode="stack", bargap=0.42, legend_traceorder="normal")
     fig.update_yaxes(autorange="reversed")
     fig.update_xaxes(showgrid=True, gridcolor="#F0F2F4", dtick=5)
     return fig

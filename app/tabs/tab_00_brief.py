@@ -28,6 +28,7 @@ import streamlit as st
 import charts
 import components as C
 import data
+import queries
 from theme import (BORDER, INK, NOISE_AMBER, SNOWFLAKE_BLUE, SOLANA_PURPLE,
                    TEXT_MUTED)
 
@@ -47,36 +48,59 @@ UNIT_LABEL = {
 }
 
 
+#: The two figures the specification pins permanently. They are pinned as
+#: the row's own label rather than as a floating callout, because a
+#: callout box has to be placed somewhere and every placement collided
+#: with either its own marker or the row above it.
+PINNED = {
+    "BFOREAI_LA_FIRES": "119 lookalike domains in six days",
+    "WFP_GAZA_TRUCKS": "590 trucks moved, 371 collected",
+}
+
+#: Row labels. The claim as filed is written for a citation list, not for
+#: a chart axis, so each one is shortened to the phrase that identifies
+#: it. Nothing here changes what the figure says.
+ROW_LABEL = {
+    "WFP_SUDAN_GEZIRA": "Warehouse diversion, Sudan",
+    "BFOREAI_LA_FIRES": "Impersonation after disaster, US",
+    "IC3_2024": "Charitable fraud losses, US",
+    "GOFUNDME_LA": "Legitimate pool being imitated, US",
+    "MGNREGA_LEAKAGE": "Programme leakage, India",
+    "WFP_GAZA_TRUCKS": "Last-mile diversion, Gaza",
+    "CAG_PMAY_UP": "Diversion before delivery, India",
+}
+
+
 def _timeline_frame(citations: pd.DataFrame) -> pd.DataFrame:
-    """Lay the citations out for C00-1.
+    """Lay the citations out for C00-1, one row per citation.
 
     Marker area scales with magnitude, normalised WITHIN each unit type,
-    because dollars and tonnes are not comparable and pretending otherwise
-    would be exactly the kind of sloppy presentation this tab argues
-    against.
+    because dollars and tonnes are not comparable and pretending
+    otherwise would be exactly the kind of sloppy presentation this tab
+    argues against.
     """
     df = citations.copy()
     df["published_on"] = pd.to_datetime(df["published_on"])
+    df = df.sort_values("published_on").reset_index(drop=True)
 
     df["marker_size"] = 18.0
-    for unit, group in df.groupby("unit_type"):
+    for _unit, group in df.groupby("unit_type"):
         top = group["magnitude"].max()
         if top and top > 0:
-            scaled = 16 + 26 * (group["magnitude"] / top) ** 0.5
+            scaled = 16 + 22 * (group["magnitude"] / top) ** 0.5
             df.loc[group.index, "marker_size"] = scaled
 
     df["label"] = [
-        UNIT_LABEL.get(str(unit), lambda v: f"{v:,.0f}")(float(mag))
-        for unit, mag in zip(df["unit_type"], df["magnitude"])
+        PINNED.get(str(cid))
+        or UNIT_LABEL.get(str(unit), lambda v: f"{v:,.0f}")(float(mag))
+        for cid, unit, mag in zip(df["citation_id"], df["unit_type"],
+                                  df["magnitude"])
     ]
-
-    # One lane per region, with a small offset inside the lane so the
-    # three United States citations from January 2025 do not stack.
-    lanes = {region: i for i, region in enumerate(dict.fromkeys(df["region"]))}
-    df["lane"] = df["region"].map(lanes).astype(float)
-    within = df.groupby("region").cumcount()
-    size = df.groupby("region")["region"].transform("size")
-    df["lane"] += (within - (size - 1) / 2) * 0.20
+    df["row_label"] = [
+        ROW_LABEL.get(str(cid), str(claim))
+        for cid, claim in zip(df["citation_id"], df["claim"])
+    ]
+    df["row"] = df.index.astype(float)
     return df
 
 
@@ -191,8 +215,8 @@ STAGE_BY_KEY = {s["key"]: s for s in STAGES}
 #: 920, which is the viewBox width, so the diagram fills its column at
 #: any browser width without a stray margin on one side.
 _BOX_W, _BOX_H, _GAP = 152, 58, 40
-_ROW_Y = 54
-_BRANCH_Y = 166
+_ROW_Y = 34
+_BRANCH_Y = 142
 _BRANCH_H = 52
 
 
@@ -208,7 +232,7 @@ def system_map(active: str, counts: dict[str, str]) -> str:
     two pixels of stroke against one for everything else.
     """
     parts: list[str] = [
-        '<svg viewBox="0 0 920 232" width="100%" '
+        '<svg viewBox="0 0 920 206" width="100%" '
         'xmlns="http://www.w3.org/2000/svg" role="img">',
         "<defs>",
         f'<marker id="gpArrow" viewBox="0 0 10 10" refX="9" refY="5" '
@@ -234,7 +258,7 @@ def system_map(active: str, counts: dict[str, str]) -> str:
         name_fill = "#0E7FA8" if lit else INK
 
         parts.append(
-            f'<text x="{mid}" y="40" font-size="9" font-weight="600" '
+            f'<text x="{mid}" y="20" font-size="9" font-weight="600" '
             f'letter-spacing="0.14em" fill="#9CA3AF">'
             f'{stage["eyebrow"].upper()}</text>'
         )
@@ -297,6 +321,46 @@ def system_map(active: str, counts: dict[str, str]) -> str:
     return "".join(parts)
 
 
+def _stage_picker() -> str:
+    """The five stage controls above the map.
+
+    st.segmented_control arrived in Streamlit 1.40. Streamlit in Snowflake
+    pins its own version and it is not ours to choose, so a tab that
+    depends on the newer control is a tab that renders locally and dies in
+    the warehouse. That is the exact failure this whole session has been
+    spent removing, so there is a fallback, and the fallback is buttons,
+    which have existed in every version there has ever been.
+    """
+    chosen = st.session_state.get("gp_b_stage_key", "MARTS")
+
+    picker = getattr(st, "segmented_control", None)
+    if picker is not None:
+        selected = picker(
+            "stage",
+            options=STAGE_KEYS,
+            default=chosen,
+            key="gp_b_stage",
+            label_visibility="collapsed",
+        )
+        if selected:
+            st.session_state["gp_b_stage_key"] = selected
+            return selected
+        return chosen
+
+    for column, key in zip(st.columns(len(STAGE_KEYS), gap="small"),
+                           STAGE_KEYS):
+        with column:
+            if st.button(
+                key,
+                key=f"gp_b_stage_{key}",
+                use_container_width=True,
+                type="primary" if key == chosen else "secondary",
+            ):
+                st.session_state["gp_b_stage_key"] = key
+                chosen = key
+    return chosen
+
+
 def _counts_by_stage(inventory: pd.DataFrame) -> tuple[dict[str, str], dict]:
     """Turn the INFORMATION_SCHEMA roll-up into map captions and lookups."""
     lookup: dict[str, dict] = {}
@@ -352,15 +416,16 @@ def _stage_inspector(stage: dict, lookup: dict) -> None:
                 ("runtime", "Streamlit in Snowflake"),
                 ("session", "get_active_session()"),
                 ("credentials in repo", "none"),
-                ("sections", str(len(STAGE_KEYS)) and "11"),
-                ("named queries", f"{len(__import__('queries').QUERIES)}"),
+                ("sections", f"{len(STAGE_KEYS)} stages, 11 tabs"),
+                ("named queries", f"{len(queries.QUERIES)}"),
             ])
         st.markdown(
             '<div class="gp-source" style="margin-top:10px">builds from</div>',
             unsafe_allow_html=True,
         )
         st.markdown(
-            "".join(C.chip(f, "neutral") + " " for f in stage["files"]),
+            "".join(f'<span class="gp-chip gp-chip-file">{f}</span> '
+                    for f in stage["files"]),
             unsafe_allow_html=True,
         )
 
@@ -407,7 +472,7 @@ def render() -> None:
     # ---------------------------------------------------------------- S3
     C.section("Evidence timeline")
     frame = _timeline_frame(citations)
-    with st.container(border=True):
+    with C.panel():
         C.panel_head(
             "Seven cited incidents, by region and date",
             "marker area scales within a unit type only",
@@ -454,15 +519,9 @@ def render() -> None:
     inventory = data.run("Q_OBJECT_INVENTORY")
     captions, lookup = _counts_by_stage(inventory)
 
-    active = st.segmented_control(
-        "stage",
-        options=STAGE_KEYS,
-        default=st.session_state.get("gp_b_stage", "MARTS"),
-        key="gp_b_stage",
-        label_visibility="collapsed",
-    ) or "MARTS"
+    active = _stage_picker()
 
-    with st.container(border=True):
+    with C.panel():
         C.svg(
             system_map(active, captions),
             alt="Five stage pipeline from sources through staging, marts and "
@@ -486,11 +545,13 @@ def render() -> None:
     # ---------------------------------------------------------------- S5
     left, right = st.columns([1.15, 1], gap="large")
 
+    health = data.run("Q_PIPELINE_HEALTH")
+    freshness_height = max(240, 32 * len(health) + 76)
+
     with left:
         C.section("Pipeline freshness")
-        with st.container(border=True):
+        with C.panel():
             C.panel_head("Seconds since last refresh", "target lag 60s")
-            health = data.run("Q_PIPELINE_HEALTH")
             if health.empty:
                 st.markdown(
                     '<div class="gp-source">No refresh history yet.</div>',
@@ -508,7 +569,7 @@ def render() -> None:
 
     with right:
         C.section("What the warehouse holds")
-        with st.container(border=True):
+        with C.panel():
             C.panel_head("Objects by schema", "information_schema")
             if inventory.empty:
                 st.markdown(
@@ -522,16 +583,14 @@ def render() -> None:
                 inv["rank"] = inv["schema_name"].map(
                     {name: i for i, name in enumerate(order)}).fillna(99)
                 inv = inv.sort_values("rank")
+                # The two panels in this row have to end on the same
+                # line, so the inventory takes the freshness chart's
+                # height rather than one derived from its own row count.
                 st.plotly_chart(
-                    charts.horizontal_bar(
-                        inv["schema_name"].tolist(),
-                        inv["objects"].astype(int).tolist(),
-                        height=max(240, 32 * len(inv) + 76),
-                    ),
+                    charts.schema_inventory(inv, height=freshness_height),
                     use_container_width=True,
                     config=charts.bare_config(),
                 )
-        C.source_head = None
         C.source_note(
             "Tables, views and Dynamic Tables in each schema. RAW is "
             "deliberately small and deliberately untouched; MARTS is where "
@@ -540,30 +599,29 @@ def render() -> None:
 
     # ---------------------------------------------------------------- S6
     C.section("Cited sources")
-    table = citations[
-        ["claim", "figure", "issuing_body", "published_on", "url"]
-    ].copy()
-    table["published_on"] = pd.to_datetime(
-        table["published_on"]).dt.strftime("%d %b %Y")
-    table.columns = ["claim", "figure", "issuing body", "published", "url"]
-    st.dataframe(
-        table,
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "claim": st.column_config.TextColumn("claim", width="medium"),
-            "figure": st.column_config.TextColumn("figure", width="large"),
-            "issuing body": st.column_config.TextColumn(
-                "issuing body", width="medium"),
-            "published": st.column_config.TextColumn("published", width="small"),
-            "url": st.column_config.LinkColumn(
-                "source", width="small", display_text="open"),
-        },
+    sources = citations.sort_values("published_on")
+    C.table(
+        [("claim", ""), ("figure, as published", ""),
+         ("issuing body", "gp-td-muted"), ("published", "gp-td-nowrap"),
+         ("source", "gp-td-nowrap")],
+        [
+            (
+                str(r["claim"]),
+                str(r["figure"]),
+                str(r["issuing_body"]),
+                pd.to_datetime(r["published_on"]).strftime("%d %b %Y"),
+                C.link("" if pd.isna(r["url"]) else str(r["url"])),
+            )
+            for r in sources.to_dict("records")
+        ],
+        widths=("21%", "40%", "21%", "9%", "9%"),
     )
     C.source_note(
-        "Seven figures, each attributed. Nothing on this list is rounded, "
-        "embellished or restated. A project about accountability that cites "
-        "loosely has already lost the argument."
+        "Seven figures, each attributed and each quoted whole rather than "
+        "truncated to fit. Nothing on this list is rounded, embellished or "
+        "restated. Where a canonical URL is not recorded the cell says so; "
+        "a plausible-looking link nobody checked would be worse than none, "
+        "on a tab that exists to argue the opposite."
     )
 
     # ---------------------------------------------------------------- S7
