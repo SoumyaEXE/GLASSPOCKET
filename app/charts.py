@@ -1496,12 +1496,20 @@ def mint_progress(df, label_column: str, *, height: int = 300) -> go.Figure:
 
 def _ago(seconds: float) -> str:
     """A negative second offset, spelled the way a person reads a clock."""
-    seconds = abs(float(seconds))
+    seconds = float(seconds)
+    # The preview replays an edit as a positive pseudo-offset, which is
+    # its way of saying "after you pressed the button". Running that
+    # through the same arithmetic as a real negative offset would print a
+    # change you just made as though it had happened half an hour ago.
+    if seconds >= 0:
+        return "after the edit"
+    seconds = abs(seconds)
     if seconds < 90:
         return "now" if seconds < 5 else f"{seconds:.0f}s ago"
-    if seconds < 5400:
+    if seconds < 3600:
         return f"{seconds / 60:.0f} min ago"
-    return f"{seconds / 3600:.1f} h ago"
+    hours = seconds / 3600
+    return "1 hour ago" if abs(hours - 1) < 0.05 else f"{hours:.1f} hours ago"
 
 
 def value_history(df, *, height: int = 300) -> go.Figure:
@@ -1521,22 +1529,30 @@ def value_history(df, *, height: int = 300) -> go.Figure:
     scores = [float(v) for v in df["risk_score"]]
     verdicts = [str(v) for v in df["verdict"]]
 
+    # A category axis, not a numeric one. The offsets are 60, 120, 300,
+    # 600, 1800 and 3600 seconds, so on a linear axis four of the six
+    # readings crowd into the last sixth of the width and their labels
+    # overlap into each other. They are six discrete queries rather than
+    # a continuous series, and spacing them evenly is both legible and
+    # closer to what they are.
+    labels = [_ago(v) for v in as_of]
+
     fig = go.Figure()
     fig.add_scatter(
-        x=as_of, y=scores, mode="lines+markers",
+        x=labels, y=scores, mode="lines+markers",
         line=dict(color=SNOWFLAKE_BLUE, width=2.5, shape="hv"),
         marker=dict(size=9, color=INK, line=dict(width=2, color="#FFFFFF")),
-        customdata=[[_ago(v), w] for v, w in zip(as_of, verdicts)],
-        hovertemplate="%{customdata[0]}<br>score %{y:.1f}"
-                      "<br>%{customdata[1]}<extra></extra>",
+        customdata=[[w] for w in verdicts],
+        hovertemplate="%{x}<br>score %{y:.1f}"
+                      "<br>%{customdata[0]}<extra></extra>",
     )
     # Label only where the value moved. Labelling a flat line at every
     # point prints the same number six times and says nothing.
     previous = None
-    for x, y in zip(as_of, scores):
+    for label, y in zip(labels, scores):
         if previous is not None and abs(y - previous) > 1e-9:
             fig.add_annotation(
-                x=x, y=y, text=f"{y:.0f}",
+                x=label, y=y, text=f"{y:.0f}",
                 showarrow=True, arrowhead=2, arrowcolor=TEXT_MUTED,
                 font=dict(family=FONT, size=12, color=INK), ay=-28,
             )
@@ -1544,8 +1560,7 @@ def value_history(df, *, height: int = 300) -> go.Figure:
 
     fig = style_fig(fig, height=height)
     fig.update_xaxes(
-        tickmode="array", tickvals=as_of,
-        ticktext=[_ago(v) for v in as_of],
+        type="category", categoryorder="array", categoryarray=labels,
         title=dict(text="read at this Time Travel offset",
                    font=dict(family=FONT, size=11, color=TEXT_MUTED)),
     )

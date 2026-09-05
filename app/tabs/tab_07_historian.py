@@ -65,6 +65,17 @@ def _f(value, default: float = 0.0) -> float:
         return default
 
 
+def _scored_at(row) -> str:
+    """When the pipeline last computed this row, as a date."""
+    try:
+        value = row["scored_at"]
+        if value is None or pd.isna(value):
+            return "not recorded"
+        return pd.to_datetime(value).strftime("%d %B %Y, %H:%M")
+    except (KeyError, TypeError, ValueError):
+        return "not recorded"
+
+
 def _ago(seconds: float) -> str:
     seconds = abs(float(seconds))
     if seconds < 90:
@@ -166,7 +177,7 @@ def _then_and_now(shown_score, shown_verdict, original_score,
 # ---------------------------------------------------------------------------
 
 
-def _history(org_id: str, edits) -> None:
+def _history(org_id: str, edits, row) -> None:
     C.section("The same row, read at six earlier moments")
     history = data.value_history(org_id, OFFSETS)
 
@@ -206,13 +217,24 @@ def _history(org_id: str, edits) -> None:
             C.panel_head("Change log", "this session")
             if not edits:
                 C.note(
-                    "No changes this session. Every edit made here is "
-                    "listed with who made it, what it was before and what "
-                    "it became &mdash; and the list is redundant, which "
-                    "is the point. The warehouse can reconstruct all of "
-                    "it without this application's help, which is why "
-                    "this application does not keep it anywhere that "
-                    "survives the session."
+                    "No changes this session. The row as it currently "
+                    "stands is below; apply a change above and it will "
+                    "appear here with who made it, what it was before and "
+                    "what it became."
+                )
+                C.kv_rows([
+                    ("organisation", str(row["name"])),
+                    ("score", f"{_f(row['risk_score']):.1f}"),
+                    ("verdict", str(row["verdict"])),
+                    ("scored at", _scored_at(row)),
+                    ("edits this session", "0"),
+                ])
+                C.source_note(
+                    "This list is redundant, which is the point. The "
+                    "warehouse can reconstruct every change without this "
+                    "application's help, which is exactly why this "
+                    "application does not keep it anywhere that survives "
+                    "the session."
                 )
             else:
                 C.table(
@@ -292,7 +314,7 @@ def render() -> None:
                   original_verdict, bool(edits))
 
     # ---------------------------------------------------------------- S4
-    _history(org_id, edits)
+    _history(org_id, edits, row)
 
     # ---------------------------------------------------------------- S5
     C.section("Two kinds of memory, and what each one is worth")

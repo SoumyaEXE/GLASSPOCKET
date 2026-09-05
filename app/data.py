@@ -494,9 +494,17 @@ def value_history(org_id: str, offsets_seconds: tuple[int, ...]) -> pd.DataFrame
     base = run("Q_ORG_RISK_ONE", (org_id,))
     original = float(base.iloc[0]["risk_score"]) if len(base) else 0.0
 
-    rows = [{"as_of": -max(offsets_seconds), "risk_score": original,
-             "verdict": "as first scored"}]
+    # One row per offset, exactly as the warehouse path returns. It used
+    # to emit a single baseline point plus one row per edit, so before
+    # any edit the chart held one dot and the readout said "1 offsets
+    # queried" underneath a caption promising six. A flat line across six
+    # readings is the correct picture of a row nobody has touched, and it
+    # is the picture the warehouse would draw.
+    rows = [
+        {"as_of": -offset, "risk_score": original, "verdict": "as first scored"}
+        for offset in sorted(offsets_seconds, reverse=True)
+    ]
     for entry in entries:
         rows.append({"as_of": entry["at"], "risk_score": entry["score"],
                      "verdict": entry["verdict"]})
-    return pd.DataFrame(rows)
+    return pd.DataFrame(rows).sort_values("as_of").reset_index(drop=True)

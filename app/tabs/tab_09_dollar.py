@@ -140,56 +140,60 @@ def _signals(ranked) -> None:
 
 def _leaderboard(ranked) -> None:
     C.section("Who comes out best, and what that is made of")
-    left, right = st.columns([3, 2], gap="medium")
-
-    with left:
-        with C.panel():
-            C.panel_head("Confidence leaderboard", "60 delivery · 40 receipts · − risk")
-            top = ranked.nlargest(14, "confidence")
-            C.table(
+    # Full width, not a three-to-two split. A fourteen-row table beside a
+    # detail card is two columns that cannot end together: the table ran
+    # nine hundred pixels and the card stopped at four hundred, leaving
+    # half a page of white beside the ranking. They are stacked instead,
+    # and the detail gets the width to say more.
+    with C.panel():
+        C.panel_head("Confidence leaderboard",
+                     "60 delivery · 40 receipts · − risk")
+        top = ranked.nlargest(14, "confidence")
+        C.table(
+            [
+                ("organisation", "gp-td-lead"),
+                ("cause", ""),
+                ("region", ""),
+                ("delivery", "gp-td-num"),
+                ("receipts", "gp-td-num"),
+                ("moved", "gp-td-num"),
+                ("confidence", "gp-td-num"),
+            ],
+            [
                 [
-                    ("organisation", "gp-td-lead"),
-                    ("cause", ""),
-                    ("region", ""),
-                    ("delivery", "gp-td-num"),
-                    ("receipts", "gp-td-num"),
-                    ("moved", "gp-td-num"),
-                    ("confidence", "gp-td-num"),
-                ],
-                [
-                    [
-                        str(row.name),
-                        str(row.cause),
-                        str(row.state),
-                        _pct(_f(row.delivery_rate)),
-                        _pct(_f(row.receipt_coverage)),
-                        C.usd(_f(row.value_moved_usd)),
-                        f"{_f(row.confidence):.1f}",
-                    ]
-                    for row in top.itertuples()
-                ],
-                widths=["30%", "15%", "8%", "11%", "11%", "12%", "13%"],
-            )
-            C.source_note(
-                "Confidence is sixty parts delivery rate, forty parts "
-                "receipt coverage, minus half the risk score. It is a "
-                "composite and it is stated here rather than left as a "
-                "number to be trusted. While receipt coverage is thin, "
-                "delivery carries almost all of it, which is why the "
-                "delivery column and the confidence column move together."
-            )
+                    str(row.name),
+                    str(row.cause),
+                    str(row.state),
+                    _pct(_f(row.delivery_rate)),
+                    _pct(_f(row.receipt_coverage)),
+                    C.usd(_f(row.value_moved_usd)),
+                    f"{_f(row.confidence):.1f}",
+                ]
+                for row in top.itertuples()
+            ],
+            widths=["30%", "15%", "8%", "11%", "11%", "12%", "13%"],
+        )
+        C.source_note(
+            "Confidence is sixty parts delivery rate, forty parts "
+            "receipt coverage, minus half the risk score. It is a "
+            "composite and it is stated here rather than left as a "
+            "number to be trusted. While receipt coverage is thin, "
+            "delivery carries almost all of it, which is why the "
+            "delivery column and the confidence column move together."
+        )
 
-    with right:
-        with C.panel():
-            C.panel_head("Organisation detail", "staging.orgs")
-            pick = st.selectbox(
-                "organisation",
-                ranked.nlargest(40, "confidence")["org_id"].tolist(),
-                format_func=lambda oid: ranked.loc[
-                    ranked["org_id"] == oid, "name"].iloc[0],
-                key="gp_d_pick", label_visibility="collapsed",
-            )
-            row = ranked[ranked["org_id"] == pick].iloc[0]
+    with C.panel():
+        C.panel_head("Organisation detail", "staging.orgs")
+        pick = st.selectbox(
+            "organisation",
+            ranked.nlargest(40, "confidence")["org_id"].tolist(),
+            format_func=lambda oid: ranked.loc[
+                ranked["org_id"] == oid, "name"].iloc[0],
+            key="gp_d_pick", label_visibility="collapsed",
+        )
+        row = ranked[ranked["org_id"] == pick].iloc[0]
+        card, figures = st.columns([3, 2], gap="medium")
+        with card:
             st.markdown(
                 f'<div class="gp-card">'
                 f'<div class="gp-card-name">{row["name"]}</div>'
@@ -199,6 +203,14 @@ def _leaderboard(ranked) -> None:
                 f"</div>",
                 unsafe_allow_html=True,
             )
+            C.chips([
+                ("verified", "verified"),
+                ("in good standing", "neutral"),
+                ("receipts on chain", "chain")
+                if _f(row["receipt_coverage"]) > 0
+                else ("awaiting a receipt", "neutral"),
+            ])
+        with figures:
             C.kv_rows([
                 ("EIN", str(row["ein"])),
                 ("disbursements", f"{_i(row['disbursements']):,}"),
@@ -207,19 +219,12 @@ def _leaderboard(ranked) -> None:
                 ("receipt coverage", _pct(_f(row["receipt_coverage"]), 1)),
                 ("confidence", f"{_f(row['confidence']):.1f}"),
             ])
-            C.chips([
-                ("verified", "verified"),
-                ("in good standing", "neutral"),
-                ("receipts on chain", "chain")
-                if _f(row["receipt_coverage"]) > 0
-                else ("awaiting a receipt", "neutral"),
-            ])
-            C.source_note(
-                "The last chip is read from the data, not decoration. An "
-                "organisation with no receipt yet says so, because a row "
-                "of badges that are always green is a row of badges "
-                "nobody should believe."
-            )
+        C.source_note(
+            "The last chip is read from the data, not decoration. An "
+            "organisation with no receipt yet says so, because a row of "
+            "badges that are always green is a row of badges nobody "
+            "should believe."
+        )
 
 
 # ---------------------------------------------------------------------------

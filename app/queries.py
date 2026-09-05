@@ -176,7 +176,7 @@ Q_ORG_RISK_ONE = Query(
                comp_semantic, comp_evasion, comp_geometry,
                comp_unaccounted, comp_receipts,
                semantic_sim, evasion_gap, geom_flags,
-               unaccounted_ratio, missing_receipts
+               unaccounted_ratio, missing_receipts, scored_at
         FROM MARTS.ORG_RISK
         WHERE org_id = ?
     """,
@@ -187,7 +187,7 @@ Q_ORG_RISK_ONE = Query(
                comp_semantic, comp_evasion, comp_geometry,
                comp_unaccounted, comp_receipts,
                semantic_sim, evasion_gap, geom_flags,
-               unaccounted_ratio, missing_receipts
+               unaccounted_ratio, missing_receipts, scored_at
         FROM org_risk WHERE org_id = ?
     """,
     note=(
@@ -1504,7 +1504,12 @@ Q_RECEIPT_KPI = Query(
 Q_MINT_PROGRESS = Query(
     sql="""
         SELECT q.amount_band,
-               COUNT(*)                                       AS queued,
+               -- COUNT(DISTINCT q.queue_id), not COUNT(*). The join to
+               -- the log fans out on any disbursement minted more than
+               -- once, so a plain row count reported 4,412 queued
+               -- against a queue holding 4,333: inflated by exactly the
+               -- 79 duplicate leaves this query exists to expose.
+               COUNT(DISTINCT q.queue_id)                     AS queued,
                COUNT(DISTINCT m.disbursement_id)              AS covered,
                COUNT(m.asset_id)                              AS leaves_written
         FROM ORACLE.MINT_QUEUE q
@@ -1515,7 +1520,12 @@ Q_MINT_PROGRESS = Query(
     """,
     local="""
         SELECT q.amount_band,
-               COUNT(*)                                       AS queued,
+               -- COUNT(DISTINCT q.queue_id), not COUNT(*). The join to
+               -- the log fans out on any disbursement minted more than
+               -- once, so a plain row count reported 4,412 queued
+               -- against a queue holding 4,333: inflated by exactly the
+               -- 79 duplicate leaves this query exists to expose.
+               COUNT(DISTINCT q.queue_id)                     AS queued,
                COUNT(DISTINCT m.disbursement_id)              AS covered,
                COUNT(m.asset_id)                              AS leaves_written
         FROM mint_queue q
@@ -1534,7 +1544,12 @@ Q_MINT_PROGRESS = Query(
 Q_MINT_PROGRAMME = Query(
     sql="""
         SELECT q.programme_code,
-               COUNT(*)                                       AS queued,
+               -- COUNT(DISTINCT q.queue_id), not COUNT(*). The join to
+               -- the log fans out on any disbursement minted more than
+               -- once, so a plain row count reported 4,412 queued
+               -- against a queue holding 4,333: inflated by exactly the
+               -- 79 duplicate leaves this query exists to expose.
+               COUNT(DISTINCT q.queue_id)                     AS queued,
                COUNT(DISTINCT m.disbursement_id)              AS covered,
                COUNT(m.asset_id)                              AS leaves_written
         FROM ORACLE.MINT_QUEUE q
@@ -1545,7 +1560,12 @@ Q_MINT_PROGRAMME = Query(
     """,
     local="""
         SELECT q.programme_code,
-               COUNT(*)                                       AS queued,
+               -- COUNT(DISTINCT q.queue_id), not COUNT(*). The join to
+               -- the log fans out on any disbursement minted more than
+               -- once, so a plain row count reported 4,412 queued
+               -- against a queue holding 4,333: inflated by exactly the
+               -- 79 duplicate leaves this query exists to expose.
+               COUNT(DISTINCT q.queue_id)                     AS queued,
                COUNT(DISTINCT m.disbursement_id)              AS covered,
                COUNT(m.asset_id)                              AS leaves_written
         FROM mint_queue q
