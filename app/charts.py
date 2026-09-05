@@ -1372,54 +1372,121 @@ def query_log(df, floor: float) -> go.Figure:
 # ---------------------------------------------------------------------------
 
 
-def receipt_gap(df) -> go.Figure:
+def receipt_gap(df, *, height: int = 340) -> go.Figure:
     """Two cumulative step lines. Where they separate, fill the gap red.
 
     The visual argument is that a missing receipt is itself a finding,
     which is the entire reason a public ledger belongs in this design.
+
+    WHAT THE SHAPE OF THIS CHART ACTUALLY SAYS.
+
+        The purple line is flat at zero for four months and then steps up
+        once. That is not four months of neglect, and reading it that way
+        is the trap the first version of this chart walked into by
+        annotating only the final gap. Minting is a migration: it began
+        on one day, ran for twenty-two minutes, and wrote as many leaves
+        as devnet SOL allowed. The date it began is marked on the chart
+        so the flat stretch is read as "before the bridge existed" rather
+        than as "nobody bothered".
+
+        The red area is still the finding. It is just a finding about how
+        far the migration has got, not about a record that was quietly
+        skipped.
     """
     fig = go.Figure()
     fig.add_scatter(
         x=df["day"], y=df["cum_actual"], mode="lines",
         line=dict(color=SOLANA_PURPLE, width=2.5, shape="hv"),
         name="receipts confirmed on chain",
-        hovertemplate="%{x|%d %b}: %{y} on chain<extra></extra>",
+        hovertemplate="%{x|%d %b}: %{y:,} on chain<extra></extra>",
     )
     fig.add_scatter(
         x=df["day"], y=df["cum_expected"], mode="lines",
         line=dict(color=SNOWFLAKE_BLUE, width=2.5, shape="hv"),
         fill="tonexty", fillcolor="rgba(229,72,77,0.16)",
         name="verified in the warehouse",
-        hovertemplate="%{x|%d %b}: %{y} expected<extra></extra>",
+        hovertemplate="%{x|%d %b}: %{y:,} expected<extra></extra>",
     )
+
+    # The day the ledger first heard about any of this.
+    started = None
+    for row in df.itertuples():
+        if float(getattr(row, "cum_actual", 0) or 0) > 0:
+            started = row.day
+            break
+    if started is not None:
+        fig.add_vline(
+            x=started, line=dict(color=SOLANA_PURPLE, width=1, dash="dot"),
+        )
+        fig.add_annotation(
+            x=started, y=1.0, xref="x", yref="paper",
+            text="minting begins", showarrow=False,
+            xanchor="right", yanchor="bottom", xshift=-6,
+            font=dict(family=FONT, size=11, color=SOLANA_PURPLE),
+        )
+
     if len(df):
         last = df.iloc[-1]
-        if last["cum_gap"] > 0:
+        if float(last["cum_gap"] or 0) > 0:
             fig.add_annotation(
                 x=last["day"],
-                y=(last["cum_expected"] + last["cum_actual"]) / 2,
-                text=f"no receipt<br>{int(last['cum_gap'])}",
+                y=(float(last["cum_expected"]) + float(last["cum_actual"])) / 2,
+                text=f"awaiting a receipt<br>{int(last['cum_gap']):,}",
                 showarrow=True, arrowhead=2, arrowcolor=FLAG_RED,
                 font=dict(family=FONT, size=12, color=FLAG_RED),
-                ax=-46, ay=0,
+                ax=-64, ay=0,
+                bgcolor="rgba(255,255,255,0.86)",
             )
-    return style_fig(fig, height=340, legend=True)
+    fig = style_fig(fig, height=height, legend=True)
+    fig.update_yaxes(separatethousands=True, title=dict(
+        text="cumulative records",
+        font=dict(family=FONT, size=11, color=TEXT_MUTED)))
+    return fig
 
 
-def mint_activity(df) -> go.Figure:
-    """One point per compressed NFT over time.
+def mint_progress(df, label_column: str, *, height: int = 300) -> go.Figure:
+    """How far the migration has got, per band or per appeal.
 
-    Exists to confirm to a sceptical judge that the volume is genuine
-    rather than three hand-made tokens created for a screenshot.
+    THIS REPLACED A STRIP OF DOTS THAT SAID NOTHING.
+
+        The old chart put one marker per mint on a time axis against the
+        amount band. Every mint in the corpus landed inside one
+        twenty-two minute window, so all of them piled onto three
+        horizontal lines and the picture was three solid purple bars. It
+        was offered as proof that the volume was genuine, and it could
+        not have distinguished three hundred mints from three.
+
+        What is actually worth showing is the part that is not finished:
+        how many records are queued against how many the ledger has, per
+        group, so no group can be quietly ahead of the others.
     """
+    labels = list(df[label_column])
+    queued = [int(v or 0) for v in df["queued"]]
+    covered = [int(v or 0) for v in df["covered"]]
+    remaining = [max(q - c, 0) for q, c in zip(queued, covered)]
+
     fig = go.Figure()
-    fig.add_scatter(
-        x=df["minted_at"], y=df["amount_band"], mode="markers",
-        marker=dict(size=7, color=SOLANA_PURPLE, opacity=0.6),
-        customdata=df[["asset_id"]],
-        hovertemplate="%{customdata[0]}<br>%{x|%d %b %H:%M}<extra></extra>",
+    fig.add_bar(
+        y=labels, x=covered, orientation="h", name="on the ledger",
+        marker=dict(color=SOLANA_PURPLE),
+        hovertemplate="%{y}<br>%{x:,} on the ledger<extra></extra>",
     )
-    return style_fig(fig, height=300)
+    fig.add_bar(
+        y=labels, x=remaining, orientation="h", name="still queued",
+        marker=dict(color="#E9EBEF"),
+        text=[f"{c:,} of {q:,}" for c, q in zip(covered, queued)],
+        textposition="outside",
+        textfont=dict(family=FONT, size=11, color=TEXT_MUTED),
+        cliponaxis=False, constraintext="none",
+        hovertemplate="%{y}<br>%{x:,} still queued<extra></extra>",
+    )
+    fig = style_fig(fig, height=height, legend=True)
+    fig.update_layout(barmode="stack", bargap=0.4, legend_traceorder="normal")
+    fig.update_yaxes(autorange="reversed")
+    top = max(queued + [1])
+    fig.update_xaxes(range=[0, top * 1.22], separatethousands=True,
+                     showgrid=True, gridcolor="#F0F2F4")
+    return fig
 
 
 # ---------------------------------------------------------------------------
@@ -1427,28 +1494,69 @@ def mint_activity(df) -> go.Figure:
 # ---------------------------------------------------------------------------
 
 
-def value_history(df) -> go.Figure:
+def _ago(seconds: float) -> str:
+    """A negative second offset, spelled the way a person reads a clock."""
+    seconds = abs(float(seconds))
+    if seconds < 90:
+        return "now" if seconds < 5 else f"{seconds:.0f}s ago"
+    if seconds < 5400:
+        return f"{seconds / 60:.0f} min ago"
+    return f"{seconds / 3600:.1f} h ago"
+
+
+def value_history(df, *, height: int = 300) -> go.Figure:
     """Score for the selected organisation across Time Travel offsets.
 
     An operator can alter the present but not the record of the past,
     which is the warehouse-side counterpart to the on-chain receipt.
+
+    The x axis used to be the raw offset column, so it read
+    -3601, -3600.5, -3600 and the reader was asked to translate negative
+    seconds into a moment in time. The offsets are the query parameter,
+    not the label: they are spelled here as the clock reading they stand
+    for, and the ticks are placed only where a query was actually made
+    rather than wherever a linear axis felt like putting one.
     """
+    as_of = [float(v) for v in df["as_of"]]
+    scores = [float(v) for v in df["risk_score"]]
+    verdicts = [str(v) for v in df["verdict"]]
+
     fig = go.Figure()
     fig.add_scatter(
-        x=df["as_of"], y=df["risk_score"], mode="lines+markers",
+        x=as_of, y=scores, mode="lines+markers",
         line=dict(color=SNOWFLAKE_BLUE, width=2.5, shape="hv"),
-        marker=dict(size=8, color=INK),
-        hovertemplate="%{x}<br>score %{y:.1f}<extra></extra>",
+        marker=dict(size=9, color=INK, line=dict(width=2, color="#FFFFFF")),
+        customdata=[[_ago(v), w] for v, w in zip(as_of, verdicts)],
+        hovertemplate="%{customdata[0]}<br>score %{y:.1f}"
+                      "<br>%{customdata[1]}<extra></extra>",
     )
-    changes = df[df["risk_score"].diff().fillna(0) != 0]
-    for row in changes.itertuples():
-        fig.add_annotation(
-            x=row.as_of, y=row.risk_score,
-            text=f"{row.risk_score:.0f}",
-            showarrow=True, arrowhead=2, arrowcolor=TEXT_MUTED,
-            font=dict(family=FONT, size=12, color=INK), ay=-28,
-        )
-    return style_fig(fig, height=300)
+    # Label only where the value moved. Labelling a flat line at every
+    # point prints the same number six times and says nothing.
+    previous = None
+    for x, y in zip(as_of, scores):
+        if previous is not None and abs(y - previous) > 1e-9:
+            fig.add_annotation(
+                x=x, y=y, text=f"{y:.0f}",
+                showarrow=True, arrowhead=2, arrowcolor=TEXT_MUTED,
+                font=dict(family=FONT, size=12, color=INK), ay=-28,
+            )
+        previous = y
+
+    fig = style_fig(fig, height=height)
+    fig.update_xaxes(
+        tickmode="array", tickvals=as_of,
+        ticktext=[_ago(v) for v in as_of],
+        title=dict(text="read at this Time Travel offset",
+                   font=dict(family=FONT, size=11, color=TEXT_MUTED)),
+    )
+    span = (max(scores) - min(scores)) if scores else 0.0
+    pad = max(span * 0.4, 3.0)
+    fig.update_yaxes(
+        range=[min(scores) - pad, max(scores) + pad] if scores else None,
+        title=dict(text="risk score",
+                   font=dict(family=FONT, size=11, color=TEXT_MUTED)),
+    )
+    return fig
 
 
 # ---------------------------------------------------------------------------
@@ -1577,51 +1685,113 @@ def pipeline_freshness(df) -> go.Figure:
 # ---------------------------------------------------------------------------
 
 
-def confidence_scatter(df) -> go.Figure:
+def confidence_scatter(df, *, height: int = 420) -> go.Figure:
     """Bubble scatter. The warm counterpart to Tab 01's cold open.
 
     X is confirmed delivery rate, Y is receipt coverage, bubble area is
-    value moved, colour by cause. The upper right quadrant is shaded and
-    labelled: give here with confidence. Every dot is a real organisation.
+    value moved. Every dot is a real organisation.
+
+    TWO THINGS WERE WRONG WITH THE FIRST VERSION.
+
+        It coloured by cause, and this corpus has twenty-five causes, so
+        the chart arrived under five rows of legend that pushed the plot
+        off the fold and told the reader nothing: the cause of a dot is a
+        fact about that dot, which is what a hover is for, not a
+        dimension anyone was comparing.
+
+        And it shaded a quadrant at seventy percent on both axes and
+        labelled it "give here with confidence" while the highest receipt
+        coverage in the corpus was fifty-seven percent, so the box it
+        pointed at was empty by construction. A recommendation region
+        that cannot contain anything is worse than none.
+
+    The split that does carry meaning is whether the ledger has heard of
+    an organisation at all, because minting is a migration in progress.
+    That is two colours and a two-item legend, and the y axis reads as a
+    statement about the migration rather than about the organisations.
     """
+    has = df[df["receipt_coverage"] > 0]
+    awaiting = df[df["receipt_coverage"] <= 0]
+    sizeref = 2.0 * max(float(df["value_moved_usd"].max() or 1), 1) / (44.0 ** 2)
+
     fig = go.Figure()
-
-    fig.add_shape(
-        type="rect", x0=0.7, x1=1.02, y0=0.7, y1=1.02,
-        fillcolor="rgba(41,181,232,0.08)", line=dict(width=0), layer="below",
-    )
-    fig.add_annotation(
-        x=0.86, y=1.0, text="give here with confidence",
-        showarrow=False,
-        font=dict(family=FONT, size=12, color="#0E7FA8"),
-    )
-
-    causes = list(dict.fromkeys(df["cause"]))
-    sizeref = 2.0 * max(float(df["value_moved_usd"].max() or 1), 1) / (46.0 ** 2)
-    for idx, cause in enumerate(causes):
-        sub = df[df["cause"] == cause]
+    for sub, name, colour, opacity in (
+        (awaiting, "awaiting a receipt", NEUTRAL, 0.32),
+        (has, "receipts on chain", SOLANA_PURPLE, 0.72),
+    ):
+        if not len(sub):
+            continue
         fig.add_scatter(
             x=sub["delivery_rate"], y=sub["receipt_coverage"], mode="markers",
             marker=dict(
                 size=sub["value_moved_usd"], sizemode="area",
-                sizeref=sizeref, sizemin=5,
-                color=CATEGORICAL[idx % len(CATEGORICAL)],
-                opacity=0.7, line=dict(width=1, color="#FFFFFF"),
+                sizeref=sizeref, sizemin=4, color=colour,
+                opacity=opacity, line=dict(width=1, color="#FFFFFF"),
             ),
-            name=cause,
-            customdata=sub[["name", "city", "state", "value_moved_usd"]],
-            hovertemplate="<b>%{customdata[0]}</b><br>%{customdata[1]}, %{customdata[2]}"
+            name=name,
+            customdata=sub[["name", "city", "state", "value_moved_usd", "cause"]],
+            hovertemplate="<b>%{customdata[0]}</b><br>%{customdata[4]}"
+                          "<br>%{customdata[1]}, %{customdata[2]}"
                           "<br>delivery %{x:.0%} &middot; receipts %{y:.0%}"
                           "<br>$%{customdata[3]:,.0f} moved<extra></extra>",
         )
 
-    fig.update_xaxes(range=[0, 1.05], tickformat=".0%", title=dict(
+    top = max(float(df["receipt_coverage"].max() or 0.0), 0.05)
+    fig.update_xaxes(range=[0.25, 1.04], tickformat=".0%", title=dict(
         text="confirmed delivery rate",
         font=dict(family=FONT, size=12, color=TEXT_MUTED)))
-    fig.update_yaxes(range=[0, 1.05], tickformat=".0%", title=dict(
-        text="receipt coverage",
-        font=dict(family=FONT, size=12, color=TEXT_MUTED)))
-    return style_fig(fig, height=420, legend=True)
+    fig.update_yaxes(range=[-top * 0.06, top * 1.12], tickformat=".0%",
+                     title=dict(
+                         text="receipt coverage",
+                         font=dict(family=FONT, size=12, color=TEXT_MUTED)))
+    return style_fig(fig, height=height, legend=True)
+
+
+def cause_signals(df, *, height: int = 380) -> go.Figure:
+    """Median delivery and median receipt coverage, per cause, on one row.
+
+    THIS REPLACED SIX EMPTY SUBPLOTS.
+
+        The small multiples plotted every organisation in a cause on its
+        own pair of axes. With receipt coverage near zero for most of the
+        corpus, all six panels drew the same flat line along the bottom,
+        six times, and shared axes made every one of them look identical
+        because they were.
+
+        A dot plot compares the causes directly, which is the comparison
+        the section was for, and it survives a signal that is mostly zero
+        because a median of zero is a legible position on a line rather
+        than a smear against an axis.
+    """
+    causes = list(df["cause"])
+    fig = go.Figure()
+    for row in df.itertuples():
+        fig.add_scatter(
+            x=[float(row.delivery_rate), float(row.receipt_coverage)],
+            y=[row.cause, row.cause], mode="lines",
+            line=dict(color=BORDER, width=1.5),
+            showlegend=False, hoverinfo="skip",
+        )
+    for column, name, colour in (
+        ("receipt_coverage", "median receipt coverage", SOLANA_PURPLE),
+        ("delivery_rate", "median delivery rate", CONFIRMED_GREEN),
+    ):
+        fig.add_scatter(
+            x=[float(v) for v in df[column]], y=causes, mode="markers",
+            marker=dict(size=11, color=colour,
+                        line=dict(width=1.5, color="#FFFFFF")),
+            name=name,
+            customdata=[int(v) for v in df["orgs"]],
+            hovertemplate="%{y}<br>" + name
+                          + " %{x:.0%}<br>%{customdata} organisations"
+                            "<extra></extra>",
+        )
+    fig = style_fig(fig, height=height, legend=True)
+    fig.update_layout(legend_traceorder="reversed")
+    fig.update_xaxes(range=[-0.03, 1.04], tickformat=".0%", showgrid=True,
+                     gridcolor="#F0F2F4")
+    fig.update_yaxes(autorange="reversed")
+    return fig
 
 
 def horizontal_bar(labels, values, *, colour=SNOWFLAKE_BLUE, height=280,

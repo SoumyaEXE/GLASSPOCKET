@@ -120,7 +120,12 @@ def main() -> int:
         print(f"after release    charts {_charts(at)}")
 
     goto(7)   # The Historian
-    apply_change = [b for b in at.button if b.label == "apply"]
+    # Matched by prefix, not by the whole label. An exact match meant
+    # that renaming the button to "apply the change" silently skipped the
+    # tamper path and the run still reported clean, which is the worst
+    # thing a smoke test can do.
+    apply_change = [b for b in at.button
+                    if (b.label or "").startswith("apply")]
     if apply_change:
         apply_change[0].click().run()
         problems += _problems(at, "tab 07 apply")

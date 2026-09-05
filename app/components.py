@@ -166,22 +166,28 @@ def identifier(text: str, label: str | None = None, *, copyable: bool = True) ->
     replacement for st.code and it is why no monospace appears in the
     application. Section 03, absolute rule.
     """
-    label_html = (
-        f'<div class="gp-identifier-label">{_esc(label)}</div>' if label else ""
-    )
-    st.markdown(
-        f'{label_html}<div class="gp-identifier">{_esc(text)}</div>',
-        unsafe_allow_html=True,
-    )
+    if label:
+        st.markdown(f'<div class="gp-identifier-label">{_esc(label)}</div>',
+                    unsafe_allow_html=True)
     if copyable:
-        # A selectable field is the copy control. st.code would force
-        # monospace, so it is never used.
+        # A selectable field is the copy control, and it is the ONLY
+        # element rendered. It used to sit underneath a styled div
+        # carrying the same string, so every copyable identifier printed
+        # its own value twice in two boxes that looked almost alike; on
+        # The Receipt that put the tree address on screen three times
+        # between the stat band and the field. The field is styled to
+        # match .gp-identifier in theme.py, so nothing is lost by
+        # dropping the div. st.code is never used, because it would
+        # force monospace.
         st.text_input(
             label or "identifier",
             value=str(text),
             key=f"copy_{abs(hash((label, text)))}",
             label_visibility="collapsed",
         )
+    else:
+        st.markdown(f'<div class="gp-identifier">{_esc(text)}</div>',
+                    unsafe_allow_html=True)
 
 
 def sql_block(sql: str, label: str | None = None) -> None:

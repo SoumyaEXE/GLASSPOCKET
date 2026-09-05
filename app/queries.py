@@ -1466,13 +1466,95 @@ Q_FILTER_OPTIONS = Query(
 
 Q_RECEIPT_KPI = Query(
     sql="""
-        SELECT (SELECT COUNT(*) FROM ORACLE.MINT_LOG)             AS receipts_on_chain,
-               (SELECT MAX(cum_gap) FROM SERVING.V_RECEIPT_GAP)   AS receipts_missing
+        SELECT (SELECT COUNT(*) FROM ORACLE.MINT_LOG)                  AS receipts_on_chain,
+               (SELECT COUNT(DISTINCT disbursement_id) FROM ORACLE.MINT_LOG)
+                                                                       AS disbursements_covered,
+               (SELECT COUNT(*) FROM ORACLE.MINT_QUEUE)                AS queued,
+               (SELECT COUNT(*) FROM ORACLE.MINT_QUEUE) -
+               (SELECT COUNT(DISTINCT disbursement_id) FROM ORACLE.MINT_LOG)
+                                                                       AS awaiting,
+               (SELECT MIN(minted_at) FROM ORACLE.MINT_LOG)            AS first_mint,
+               (SELECT MAX(minted_at) FROM ORACLE.MINT_LOG)            AS last_mint
     """,
     local="""
-        SELECT (SELECT COUNT(*) FROM mint_log) AS receipts_on_chain,
-               (SELECT SUM(receipts_missing) FROM receipt_coverage) AS receipts_missing
+        SELECT (SELECT COUNT(*) FROM mint_log)                         AS receipts_on_chain,
+               (SELECT COUNT(DISTINCT disbursement_id) FROM mint_log)  AS disbursements_covered,
+               (SELECT COUNT(*) FROM mint_queue)                       AS queued,
+               (SELECT COUNT(*) FROM mint_queue) -
+               (SELECT COUNT(DISTINCT disbursement_id) FROM mint_log)  AS awaiting,
+               (SELECT MIN(minted_at) FROM mint_log)                   AS first_mint,
+               (SELECT MAX(minted_at) FROM mint_log)                   AS last_mint
     """,
+    note=(
+        "REWRITTEN, because the two backends were answering different "
+        "questions. The warehouse read MAX(cum_gap) off the daily gap view "
+        "and the preview summed receipts_missing off the coverage table, "
+        "and the two came back 206 apart on the same corpus. Both figures "
+        "are now counted straight off the queue and the log, which is the "
+        "only pair of objects that cannot disagree with itself.\n\n"
+        "receipts_on_chain and disbursements_covered are deliberately "
+        "separate. A mint is an append and it is not idempotent: a retried "
+        "disbursement writes a second leaf, and an append-only ledger has "
+        "no way to take the first one back. Reporting 285 receipts as 285 "
+        "disbursements would be the sort of quiet overstatement this whole "
+        "application exists to argue against."
+    ),
+)
+
+Q_MINT_PROGRESS = Query(
+    sql="""
+        SELECT q.amount_band,
+               COUNT(*)                                       AS queued,
+               COUNT(DISTINCT m.disbursement_id)              AS covered,
+               COUNT(m.asset_id)                              AS leaves_written
+        FROM ORACLE.MINT_QUEUE q
+        LEFT JOIN ORACLE.MINT_LOG m ON m.disbursement_id = q.disbursement_id
+        GROUP BY q.amount_band
+        ORDER BY queued DESC
+        LIMIT 20
+    """,
+    local="""
+        SELECT q.amount_band,
+               COUNT(*)                                       AS queued,
+               COUNT(DISTINCT m.disbursement_id)              AS covered,
+               COUNT(m.asset_id)                              AS leaves_written
+        FROM mint_queue q
+        LEFT JOIN mint_log m ON m.disbursement_id = q.disbursement_id
+        GROUP BY q.amount_band
+        ORDER BY queued DESC
+        LIMIT 20
+    """,
+    note=(
+        "Migration progress by the only field the queue publishes about "
+        "value. The band, never the amount: the band is what goes on chain, "
+        "so it is also what this tab is allowed to group by."
+    ),
+)
+
+Q_MINT_PROGRAMME = Query(
+    sql="""
+        SELECT q.programme_code,
+               COUNT(*)                                       AS queued,
+               COUNT(DISTINCT m.disbursement_id)              AS covered,
+               COUNT(m.asset_id)                              AS leaves_written
+        FROM ORACLE.MINT_QUEUE q
+        LEFT JOIN ORACLE.MINT_LOG m ON m.disbursement_id = q.disbursement_id
+        GROUP BY q.programme_code
+        ORDER BY queued DESC
+        LIMIT 20
+    """,
+    local="""
+        SELECT q.programme_code,
+               COUNT(*)                                       AS queued,
+               COUNT(DISTINCT m.disbursement_id)              AS covered,
+               COUNT(m.asset_id)                              AS leaves_written
+        FROM mint_queue q
+        LEFT JOIN mint_log m ON m.disbursement_id = q.disbursement_id
+        GROUP BY q.programme_code
+        ORDER BY queued DESC
+        LIMIT 20
+    """,
+    note="The same progress by appeal, so no programme can be quietly ahead.",
 )
 
 Q_TREE_STATE = Query(
@@ -1561,11 +1643,19 @@ Q_MINT_ACTIVITY = Query(
         LIMIT 3000
     """,
     local="""
-        SELECT asset_id, minted_at, amount_band
-        FROM mint_log
-        ORDER BY minted_at
+        SELECT m.asset_id, m.minted_at, q.amount_band
+        FROM mint_log m
+        JOIN mint_queue q USING (disbursement_id)
+        ORDER BY m.minted_at
         LIMIT 3000
     """,
+    note=(
+        "The band comes from the queue, not from the log. ORACLE.MINT_LOG "
+        "records what the chain returned and nothing about the payload; the "
+        "preview used to carry an amount_band column on the log because the "
+        "preview was a mock-up rather than a mirror, and reading it broke "
+        "the moment the real table was synced in."
+    ),
 )
 
 Q_SAMPLE_ASSET = Query(
@@ -1694,7 +1784,8 @@ Q_CONFIDENCE_RANK = Query(
                delivery_rate, receipt_coverage, value_moved_usd,
                disbursements, confidence
         FROM SERVING.V_CONFIDENCE_RANK
-        WHERE (? IS NULL OR cause = ?)
+        WHERE disbursements > 0
+          AND (? IS NULL OR cause = ?)
           AND (? IS NULL OR state = ?)
           AND receipt_coverage >= ?
         ORDER BY confidence DESC
@@ -1727,11 +1818,25 @@ Q_CONFIDENCE_RANK = Query(
         ORDER BY confidence DESC
         LIMIT 400
     """,
-    note="Hard filter on is_synthetic, verified by acceptance check INT-05.",
+    note=(
+        "Hard filter on is_synthetic, verified by acceptance check INT-05.\n\n"
+        "disbursements > 0 is the second filter and it was missing from the "
+        "warehouse statement. SERVING.V_CONFIDENCE_RANK LEFT JOINs activity "
+        "onto every verified organisation in the filing list, so without it "
+        "the warehouse returned 44,101 rows against the preview's 820: "
+        "43,000 of them organisations that have moved no money at all, "
+        "scored zero on both axes, and sat in a heap on the origin of the "
+        "chart. The preview had the filter implicitly, through an inner "
+        "join, which is how the two backends came to disagree by a factor "
+        "of fifty about how many organisations this tab is about. An "
+        "organisation with no disbursements has not cleared every check; it "
+        "has not taken any."
+    ),
 )
 
 Q_CONFIDENCE_COUNT = Query(
-    sql="SELECT COUNT(*) AS cleared FROM SERVING.V_CONFIDENCE_RANK",
+    sql=("SELECT COUNT(*) AS cleared FROM SERVING.V_CONFIDENCE_RANK "
+         "WHERE disbursements > 0"),
     local="""
         SELECT COUNT(*) AS cleared
         FROM staging_orgs o

@@ -223,6 +223,18 @@ header[data-testid="stHeader"] {
   font-size: 11px; font-weight: 600; letter-spacing: 0.09em;
   text-transform: uppercase; color: #6B7280; margin-bottom: 4px;
 }
+/* The copy control for an identifier. It is a real input so the value
+   can be selected, and it is styled to match .gp-identifier so that
+   making it selectable does not also make it look like a form field
+   somebody is expected to fill in. */
+div[data-testid="stTextInput"].gp-copy input,
+.gp-copy input {
+  background: #F7F8FA !important; border: 1px solid #E4E7EB !important;
+  border-radius: 4px !important; font-size: 13px !important;
+  font-weight: 500 !important; color: #16181D !important;
+  font-feature-settings: 'tnum' 1; padding: 6px 10px !important;
+}
+
 .gp-sql {
   background: #F7F8FA; border: 1px solid #E4E7EB; border-radius: 6px;
   padding: 14px 16px; font-size: 13px; font-weight: 500; line-height: 1.65;

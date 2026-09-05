@@ -439,43 +439,70 @@ def _transit() -> None:
     with C.panel():
         C.panel_head("What the rule actually says",
                      "sql/08_geospatial_h3.sql")
-        C.note(
-            "This section used to plot hours against kilometres and shade "
-            "everything under a ninety kilometre an hour line as physically "
-            f"impossible. That shading caught <b>{above_truck:,}</b> of "
-            f"<b>{with_speed:,}</b> deliveries. It was not a finding, it was "
-            "a broken ruler: the distance is measured from the "
-            "organisation's registered filing address in the United States "
-            "to a delivery on another continent, so ten thousand kilometres "
-            f"in two days is {median_kmh:,.0f} km/h, which is air freight "
-            "doing what air freight does. A test that flags four deliveries "
-            "in five has found nothing."
-        )
-        C.sql_block(
-            "CASE\n"
-            "  WHEN status = 'UNACCOUNTED'   THEN 'NEVER_ARRIVED'\n"
-            "  WHEN hops > max_hops          THEN 'OUTSIDE_FOOTPRINT'\n"
-            "  WHEN transit_hours < 1\n"
-            f"   AND km_from_base > {SHIPPED_RULE_KM}  THEN 'IMPOSSIBLE_TRANSIT'\n"
-            "  ELSE 'PLAUSIBLE'\n"
-            "END",
-            "the shipped rule, marts.delivery_geometry",
-        )
-        C.readout([
-            (f"{rule_matches:,}", "match the transit rule"),
-            (f"{labelled:,}", "carry the label"),
-            (f"{masked:,}", "already failed an earlier rule"),
-            (C.usd(_f(a["rule_usd"])), "worth"),
-        ])
-        C.note(
-            f"The CASE is ordered, so the {masked:,} deliveries that fail "
-            "the transit rule <i>and</i> land outside the declared footprint "
-            "are labelled by whichever branch matched first. They are "
-            "counted once, not twice, which is why the number on the map "
-            f"reads {labelled:,} and the number of records that fail this "
-            f"particular test reads {rule_matches:,}. Both are true and "
-            "they are different questions."
-        )
+        # Two columns inside the frame. gp-note holds prose to a 68ch
+        # measure, which is the right measure and the wrong shape for a
+        # panel this wide: run down the whole width and the copy stops
+        # halfway across, leaving the other half of the frame empty. The
+        # SQL and the counts are what belong in that half.
+        prose, evidence = st.columns([1, 1], gap="medium")
+
+        with prose:
+            C.note(
+                "This section used to plot hours against kilometres and "
+                "shade everything under a ninety kilometre an hour line as "
+                f"physically impossible. That caught <b>{above_truck:,}</b> "
+                f"of <b>{with_speed:,}</b> deliveries. It was not a finding, "
+                "it was a broken ruler: the distance is measured from the "
+                "organisation's registered filing address in the United "
+                "States to a delivery on another continent, so ten thousand "
+                f"kilometres in two days is {median_kmh:,.0f} km/h, which is "
+                "air freight doing what air freight does. A test that flags "
+                "four deliveries in five has found nothing."
+            )
+            C.note(
+                f"The CASE beside this is ordered, so the {masked:,} "
+                "deliveries that fail the transit rule <i>and</i> land "
+                "outside the declared footprint are labelled by whichever "
+                "branch matched first. They are counted once, not twice, "
+                f"which is why the map reads {labelled:,} while the number "
+                "of records that fail this particular test reads "
+                f"{rule_matches:,}. Both are true, and they answer "
+                "different questions."
+            )
+            C.note(
+                "The branch reads <b>transit_hours &lt; 1</b> and the audit "
+                "beside it counts <b>transit_hours = 0</b>. Those are the "
+                "same set, not two different tests: transit_hours is "
+                "DATEDIFF over whole hours, so it comes back as an integer "
+                "and no row in the corpus sits between the two. The audit "
+                "asks for the equality because that is the thing being "
+                "claimed &mdash; no elapsed time at all &mdash; rather than "
+                "because it is a narrower filter."
+            )
+
+        with evidence:
+            # Broken onto two lines per branch. At half width the single
+            # line ran past the edge and the block scrolled sideways,
+            # which hides the branch that matters behind a scrollbar.
+            C.sql_block(
+                "CASE\n"
+                "  WHEN status = 'UNACCOUNTED'\n"
+                "    THEN 'NEVER_ARRIVED'\n"
+                "  WHEN hops > max_hops\n"
+                "    THEN 'OUTSIDE_FOOTPRINT'\n"
+                f"  WHEN transit_hours < 1 AND km_from_base > {SHIPPED_RULE_KM}\n"
+                "    THEN 'IMPOSSIBLE_TRANSIT'\n"
+                "  ELSE 'PLAUSIBLE'\n"
+                "END",
+                "the shipped rule, marts.delivery_geometry",
+            )
+            C.kv_rows([
+                ("match the transit rule", f"{rule_matches:,} deliveries"),
+                ("carry the label", f"{labelled:,} deliveries"),
+                ("already failed an earlier rule", f"{masked:,} deliveries"),
+                ("worth", C.usd(_f(a["rule_usd"]))),
+            ])
+
         C.source_note(
             "A delivery recorded as arriving in the hour it left has no "
             "implied speed, only a division by zero, so it is annotated on "

@@ -37,6 +37,16 @@ PULL = {
     "MARTS.DT_RECEIPT_COVERAGE": "receipt_coverage",
     "MARTS.DT_ORG_ACTIVITY": "org_activity",
     "MARTS.BENEFICIARY_FACTS": "beneficiary_facts",
+    # The mint tables were left out of this map, and the cost of that was
+    # a preview store that showed 4,427 receipts with fabricated asset
+    # identifiers whose explorer links resolved to nothing, while the
+    # warehouse held 285 real devnet mints. The whole argument of Tab 06
+    # is "do not trust this application, check the ledger yourself", and
+    # a preview that hands the reader an identifier which is not on any
+    # ledger undercuts it completely. Pulling them makes the preview a
+    # mirror rather than a mock-up, and the link resolves.
+    "ORACLE.MINT_LOG": "mint_log",
+    "ORACLE.MINT_QUEUE": "mint_queue",
 }
 
 
