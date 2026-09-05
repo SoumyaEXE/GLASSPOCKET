@@ -284,8 +284,7 @@ def compare_columns(
 ) -> None:
     """Two-column layout with a divider.
 
-    Used for true against private on Tab 05, and before against after on
-    Tab 07. Each side takes ``label``, ``value`` and optional ``sub``.
+    Used for before against after on The Historian. Each side takes ``label``, ``value`` and optional ``sub``.
     """
     lcol, rcol = st.columns(2, gap="medium")
     for col, side, tone in ((lcol, left, left_tone), (rcol, right, right_tone)):

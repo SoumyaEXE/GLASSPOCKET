@@ -543,10 +543,10 @@ def _how_it_works() -> None:
          "The aggregate delivery rate is tuned to a World Food Programme "
          "ratio from June 2025. The weekly series is drawn beside it so a "
          "single tuned percentage cannot pass itself off as a measurement."),
-        ("Hand the district over, and stop",
-         "The selector carries a district into The Wall. This tab never "
-         "names a person, and the query behind the handoff does not select "
-         "a column that could."),
+        ("Stop at the district",
+         "Nothing on this tab is reported below the level of a district. "
+         "No query behind it selects a beneficiary column, which is a "
+         "property of the SQL rather than a promise made in the copy."),
     ])
 
 

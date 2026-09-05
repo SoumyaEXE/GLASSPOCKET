@@ -263,7 +263,7 @@ def build_real_orgs(sample_size: int | None) -> pd.DataFrame:
         # Concentrate the vector corpus on the causes an impersonator
         # actually targets, which mirrors the region-and-cause pre-filter
         # the detection query uses. Real row counts are reported in full
-        # on Tab 10 regardless of this sampling.
+        # on The Brief regardless of this sampling.
         weights = np.where(orgs["cause"].isin(TARGET_CAUSES), 6.0, 1.0)
         weights = weights / weights.sum()
         keep = rng.choice(len(orgs), size=sample_size, replace=False, p=weights)
@@ -801,7 +801,7 @@ def build_disbursements(orgs: pd.DataFrame, per_org: int) -> pd.DataFrame:
     """Delivery events, with attrition calibrated to the WFP ratio.
 
     Real geography, synthetic movement. Section 05 and Tab 04 section S6
-    both state this, and Tab 10 states it again.
+    both state this, and The Brief states it again.
 
     Status mix is tuned so that delivered value over dispatched value
     lands close to 371/590, the WFP State of Palestine figure.
@@ -951,7 +951,7 @@ def build_beneficiaries(disb: pd.DataFrame) -> pd.DataFrame:
 
     No real personal data enters this project at any point, which is
     itself the correct engineering decision and is stated in the
-    interface. Section 07, Tab 05.
+    interface. Section 07.
     """
     bens = disb[["beneficiary_id", "district", "programme_code"]].drop_duplicates(
         subset="beneficiary_id"
@@ -1136,7 +1136,7 @@ def build_receipts(geometry: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame,
 
     THE DELIBERATE GAP. Roughly one in thirty eligible disbursements is
     withheld, so the missing-receipt finding on Tab 06 is genuine rather
-    than staged. Tab 10 discloses it.
+    than staged. The Brief discloses it.
     """
     eligible = geometry[
         (geometry["status"] == "DELIVERED")

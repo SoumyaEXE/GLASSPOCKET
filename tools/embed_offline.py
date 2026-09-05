@@ -29,7 +29,7 @@ WHAT CHANGES AND WHAT DOES NOT
     region-and-cause pre-filter. That is the part the thesis rests on and
     it is untouched.
 
-    Tab 10 and the write-up state this substitution plainly.
+    The Brief and the write-up state this substitution plainly.
 
 USAGE
     python tools/embed_offline.py                 # all orgs in the store

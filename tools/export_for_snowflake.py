@@ -78,7 +78,7 @@ def district_dim(con) -> pd.DataFrame:
     Normally this comes from IATI activity locations. No IATI slice was
     loaded for this build, which Section 04C explicitly permits, so the
     dimension is built from the synthetic delivery geography instead and
-    Tab 10 discloses it.
+    The Brief discloses it.
     """
     return con.execute("""
         SELECT district,

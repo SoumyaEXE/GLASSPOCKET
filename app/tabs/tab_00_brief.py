@@ -255,10 +255,12 @@ STAGES = (
         "files": ("sql/11_privacy_policy.sql", "sql/12_serving_views.sql"),
         "branch": (
             "PRIVACY POLICY",
-            "A minimum cohort floor, enforced by an aggregation policy. It "
-            "is not differential privacy, the tab that demonstrates it "
-            "says so in those words, and what the floor does and does not "
-            "guarantee is written out on Tab 05.",
+            "A minimum cohort floor, enforced by an aggregation policy. "
+            "It refuses any aggregate over fewer than fifty beneficiaries, "
+            "counted as distinct people. It is not differential privacy: "
+            "it adds no noise and has no query budget, so two permitted "
+            "large queries can be subtracted to learn about a handful of "
+            "people. That limitation is listed above with the others.",
         ),
     },
     {
