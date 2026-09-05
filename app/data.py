@@ -30,7 +30,6 @@ from __future__ import annotations
 import pathlib
 from dataclasses import dataclass, field
 
-import numpy as np
 import pandas as pd
 import streamlit as st
 
@@ -223,25 +222,43 @@ def true_answer(filters: dict) -> dict:
     In warehouse mode this reads PRIVILEGED.V_BENEFICIARY_OUTCOMES_TRUE under a
     privileged role. GP_ANALYST cannot read it, which is what stops Tab 05
     from being theatre.
+
+    THE COHORT IS COUNTED IN PEOPLE, NOT IN ROWS.
+
+        This used to be COUNT(*), and the tab underneath it claimed the
+        floor was counted "by beneficiary rather than by row, so one
+        person contributing many rows does not satisfy it alone". On this
+        corpus COUNT(*) is 8,545 against 7,275 actual beneficiaries, so
+        the headline overstated the group by 1,270 people and the claim
+        printed under the chart was false about the number above it.
+
+        The policy in the warehouse is defined on an ENTITY KEY over
+        beneficiary_id, so Snowflake was already counting people. Only
+        the display and the preview's own floor were counting rows. The
+        protected view answers COUNT(DISTINCT beneficiary_id) perfectly
+        well, so both sides now count the thing the guarantee is about.
     """
     where, params = _beneficiary_where(filters)
     if mode() == WAREHOUSE:
         _, session = get_backend()
         sql = (
-            "SELECT COUNT(*) AS cohort, SUM(amount_usd) AS total_usd, "
+            "SELECT COUNT(DISTINCT beneficiary_id) AS cohort, "
+            "COUNT(*) AS records, SUM(amount_usd) AS total_usd, "
             "AVG(delivered_flag) AS delivery_rate "
             "FROM PRIVILEGED.V_BENEFICIARY_OUTCOMES_TRUE " + where
         )
         df = normalise(session.sql(sql, params=params).to_pandas())
     else:
         df = run_sql_preview(
-            "SELECT COUNT(*) AS cohort, SUM(amount_usd) AS total_usd, "
+            "SELECT COUNT(DISTINCT beneficiary_id) AS cohort, "
+            "COUNT(*) AS records, SUM(amount_usd) AS total_usd, "
             "AVG(delivered_flag) AS delivery_rate FROM beneficiary_facts " + where,
             tuple(params),
         )
     row = df.iloc[0] if len(df) else {}
     return {
         "cohort": int(row.get("cohort", 0) or 0),
+        "records": int(row.get("records", 0) or 0),
         "total_usd": float(row.get("total_usd", 0) or 0),
         "delivery_rate": float(row.get("delivery_rate", 0) or 0),
     }
@@ -279,7 +296,8 @@ def released_answer(filters: dict, ledger: "PrivacyLedger",
             # from the policy it is meant to be testing.
             session.sql("USE SECONDARY ROLES NONE").collect()
             df = session.sql(
-                "SELECT COUNT(*) AS cohort, SUM(amount_usd) AS total_usd, "
+                "SELECT COUNT(DISTINCT beneficiary_id) AS cohort, "
+                "SUM(amount_usd) AS total_usd, "
                 "AVG(delivered_flag) AS delivery_rate "
                 "FROM SERVING.V_BENEFICIARY_OUTCOMES " + where,
                 params=params,
@@ -356,26 +374,31 @@ def cohort_floor() -> int:
         return 50
 
 
-def floor_curve(filters: dict) -> pd.DataFrame:
-    """Which cohort sizes get an answer at all.
+def cohort_landscape() -> pd.DataFrame:
+    """Every question this tab can be asked, and whether it gets answered.
 
-    This replaces the noise-against-cohort curve the spec specifies for a
-    differential privacy build. There is no noise to plot, so the chart
-    plots what is actually true here: below the floor nothing is
-    released, above it the exact value is.
+    THIS REPLACED A CHART THAT WAS DRAWN RATHER THAN MEASURED.
+
+        floor_curve built a log range of imaginary cohort sizes, multiplied
+        each one by a hard-coded 780 dollars per person, and drew the
+        result as "value against cohort size". It ignored the filters it
+        was passed, it plotted a straight line on a log-log axis because
+        a constant times x is a straight line on a log-log axis, and the
+        780 was not measured from anything. In an application that spends
+        eleven tabs arguing that a number should be traceable to a query,
+        the centrepiece was illustrating its own rule with invented data.
+
+        What is actually available is better. The three filters make 613
+        distinct questions, and every one of them has a real cohort. The
+        landscape returns all of them with the number of filters applied,
+        so the chart can show where the wall falls across the whole
+        space of questions rather than across a made-up one.
+
+    Read from the privileged twin on purpose: the point is to show the
+    refused questions as well as the permitted ones, and the protected
+    view by definition cannot report the refused ones.
     """
-    floor = cohort_floor()
-    cohorts = np.unique(np.logspace(0, 4, 44).astype(int))
-    per_person = 780.0
-    truth = cohorts * per_person
-    released = np.where(cohorts >= floor, truth, np.nan)
-    return pd.DataFrame({
-        "cohort": cohorts,
-        "true_value": truth,
-        "released_value": released,
-        "answered": cohorts >= floor,
-        "floor": floor,
-    })
+    return run("Q_COHORT_LANDSCAPE")
 
 
 def differencing_demo(filters: dict) -> dict | None:
@@ -393,7 +416,8 @@ def differencing_demo(filters: dict) -> dict | None:
     joiner = " AND " if where else " WHERE "
 
     def agg(threshold: float) -> dict | None:
-        sql = ("SELECT COUNT(*) AS cohort, SUM(amount_usd) AS total_usd "
+        sql = ("SELECT COUNT(DISTINCT beneficiary_id) AS cohort, "
+               "SUM(amount_usd) AS total_usd "
                "FROM {obj} " + where + joiner + "amount_usd >= ?")
         try:
             if mode() == WAREHOUSE:
@@ -418,7 +442,30 @@ def differencing_demo(filters: dict) -> dict | None:
 
     # Walk the threshold up until the two groups differ by fewer people
     # than the floor while both still clear it.
-    for threshold in (250.0, 500.0, 750.0, 1000.0, 1500.0):
+    #
+    # THE FIRST RUNG IS A DOLLAR, AND IT USED NOT TO BE THERE.
+    #
+    #     The ladder started at 250 and the section it feeds was dead:
+    #     differencing_demo returned None on every scope the tab could
+    #     reach, so the most important argument on the centrepiece tab
+    #     rendered as "widen the filters to see the differencing attack
+    #     this floor cannot prevent" and never showed it.
+    #
+    #     The reason is in the corpus rather than in the attack. Amounts
+    #     cluster, so moving a threshold from nothing to 250 dollars
+    #     drops 348 people at once, and 348 is well above the floor: the
+    #     two groups were never close enough together. What is close
+    #     together is "everyone" against "everyone who received anything
+    #     at all", because the people between them are exactly the ones
+    #     who received nothing. Within a single district that is between
+    #     thirteen and thirty-five people, which is below the floor on
+    #     every district in the corpus.
+    #
+    #     A dollar is also a better rung on its own terms. It is not an
+    #     arbitrary cut chosen to make the attack work; it is the
+    #     boundary between having been helped and not having been, and
+    #     the group it isolates is the group an attacker would want.
+    for threshold in (1.0, 100.0, 250.0, 500.0, 750.0, 1000.0, 1500.0):
         group_b = agg(threshold)
         if not group_b or group_b["cohort"] < floor:
             continue
@@ -433,6 +480,52 @@ def differencing_demo(filters: dict) -> dict | None:
                 "difference_usd": group_a["total_usd"] - group_b["total_usd"],
             }
     return None
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def differencing_scopes(filters: dict, limit: int = 6) -> list[dict]:
+    """Scopes where the attack lands, most specific first.
+
+    The gap between "everyone here" and "everyone here who received
+    anything" scales with the size of the scope, so on the whole corpus
+    it is 348 people and comfortably above the floor, while inside any
+    one district it is between thirteen and thirty-five and comfortably
+    below it. Which scopes work is therefore a property of the data, and
+    the tab reports the ones that do rather than asking the reader to
+    hunt for them with the filter controls.
+
+    Cached, and it needs to be. Probing a district costs two aggregates,
+    so an uncached search over sixteen of them would put thirty-two round
+    trips on a render path in warehouse mode. The limit stops the walk as
+    soon as enough scopes have been found to make the point.
+    """
+    found = []
+    demo = differencing_demo(filters)
+    if demo is not None:
+        demo["scope"] = _scope_label(filters)
+        found.append(demo)
+
+    if filters.get("district") in (None, "any"):
+        try:
+            options = run("Q_FILTER_OPTIONS")
+            districts = sorted(options["district"].dropna().unique().tolist())
+        except Exception:                     # noqa: BLE001
+            districts = []
+        for district in districts:
+            if len(found) >= limit:
+                break
+            probe = dict(filters, district=district, amount_band="any")
+            demo = differencing_demo(probe)
+            if demo is not None:
+                demo["scope"] = _scope_label(probe)
+                found.append(demo)
+    return found
+
+
+def _scope_label(filters: dict) -> str:
+    parts = [str(filters[k]) for k in ("district", "programme_code", "month_key")
+             if filters.get(k) and filters.get(k) != "any"]
+    return " · ".join(parts) if parts else "the whole corpus"
 
 
 def _beneficiary_where(filters: dict) -> tuple[str, list]:

@@ -1427,6 +1427,66 @@ Q_BENEFICIARY_TRUE = Query(
     note="COUNTERFACTUAL ONLY. Privileged role. Never granted to GP_ANALYST.",
 )
 
+Q_COHORT_LANDSCAPE = Query(
+    sql="""
+        SELECT COALESCE(district, 'any')                        AS district,
+               COALESCE(programme_code, 'any')                  AS programme_code,
+               COALESCE(month_key, 'any')                       AS month_key,
+               3 - (GROUPING(district) + GROUPING(programme_code)
+                    + GROUPING(month_key))                      AS filters_applied,
+               COUNT(DISTINCT beneficiary_id)                   AS people,
+               COUNT(*)                                         AS records,
+               SUM(amount_usd)                                  AS total_usd
+        FROM PRIVILEGED.V_BENEFICIARY_OUTCOMES_TRUE
+        GROUP BY GROUPING SETS (
+            (),
+            (district), (programme_code), (month_key),
+            (district, programme_code), (district, month_key),
+            (programme_code, month_key),
+            (district, programme_code, month_key)
+        )
+        ORDER BY filters_applied, people DESC
+        LIMIT 800
+    """,
+    local="""
+        SELECT COALESCE(district, 'any')                        AS district,
+               COALESCE(programme_code, 'any')                  AS programme_code,
+               COALESCE(month_key, 'any')                       AS month_key,
+               3 - (GROUPING(district) + GROUPING(programme_code)
+                    + GROUPING(month_key))                      AS filters_applied,
+               COUNT(DISTINCT beneficiary_id)                   AS people,
+               COUNT(*)                                         AS records,
+               SUM(amount_usd)                                  AS total_usd
+        FROM beneficiary_facts
+        GROUP BY GROUPING SETS (
+            (),
+            (district), (programme_code), (month_key),
+            (district, programme_code), (district, month_key),
+            (programme_code, month_key),
+            (district, programme_code, month_key)
+        )
+        ORDER BY filters_applied, people DESC
+        LIMIT 800
+    """,
+    note=(
+        "Every question Tab 05 can be asked, and how many people are "
+        "behind each one. Eight grouping sets over three filters give 613 "
+        "rows: one for the unfiltered question, 27 for a single filter, "
+        "194 for a pair, and 391 for all three. GROUPING() returns 1 for "
+        "a column the set aggregated away, so 3 minus the sum of the "
+        "three is the number of filters that question actually applies.\n\n"
+        "This reads the PRIVILEGED twin, and it has to. The point of the "
+        "chart it feeds is to show the refused questions alongside the "
+        "permitted ones, and the protected view cannot report a refused "
+        "question by construction: that is what being refused means. The "
+        "tab labels which object every figure came from.\n\n"
+        "It replaces data.floor_curve, which multiplied an imaginary "
+        "range of cohort sizes by a hard-coded 780 dollars a head and "
+        "drew the product. That chart illustrated the rule; this one "
+        "measures it."
+    ),
+)
+
 Q_COHORT_FLOOR = Query(
     sql="""
         SELECT min_group_size, mechanism, guarantee_label, guarantee_note

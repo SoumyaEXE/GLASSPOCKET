@@ -1274,66 +1274,216 @@ def delivery_rate_weekly(df, *, benchmark: float, benchmark_label: str,
 # ---------------------------------------------------------------------------
 
 
-def cohort_floor_curve(df) -> go.Figure:
-    """Which cohort sizes get an answer at all.
+#: How the three filters are described on the wall chart, by how many of
+#: them a question applies. The wording matters: the tab is about how far
+#: a question can be narrowed before the tool stops answering.
+NARROWING = {
+    0: "no filter",
+    1: "one filter",
+    2: "two filters",
+    3: "all three filters",
+}
 
-    Replaces the noise-against-cohort curve the specification asks for in
-    a differential privacy build. There is no noise here to draw, so the
-    chart draws what is true: a hard vertical line at the floor, nothing
-    released to the left of it, the exact value released to the right.
+
+def cohort_landscape(df, floor: int, *, marker_at: int | None = None,
+                     height: int = 420) -> go.Figure:
+    """Every question the tab can be asked, against the floor that answers it.
+
+    THIS REPLACED A CHART OF INVENTED NUMBERS.
+
+        The old one took a log range of imaginary cohort sizes, multiplied
+        each by a hard-coded 780 dollars a head, and drew the product as
+        "value against cohort size". It never looked at the corpus, so the
+        straight line it produced was a straight line because a constant
+        times x is a straight line, not because anything in the data was
+        linear. It illustrated the rule. This measures it.
+
+    One row per question, at the cohort size that question actually has,
+    stacked by how many of the three filters it applies. The floor is a
+    vertical line, so the wall is visible as a wall: everything to its
+    left is a question this tool will not answer, however it is phrased.
+
+    The bottom row is the finding. Every one of the 391 questions that
+    uses all three filters falls to the left of the line, which is a
+    stronger and more useful statement than any single refusal: on this
+    corpus, a question specific enough to name a district, a programme
+    and a month is a question that cannot be answered at all.
     """
-    floor = float(df["floor"].iloc[0]) if len(df) else 50.0
-    answered_mask = as_bool(df["answered"])
-    answered = df[answered_mask]
-    refused = df[~answered_mask]
+    rows = sorted(set(int(v) for v in df["filters_applied"]))
+    fig = go.Figure()
+
+    fig.add_vrect(
+        x0=0.6, x1=floor, fillcolor="rgba(229,72,77,0.05)",
+        line=dict(width=0), layer="below",
+    )
+
+    seen_answered = seen_refused = False
+    for depth in rows:
+        sub = df[df["filters_applied"] == depth]
+        label = NARROWING.get(depth, f"{depth} filters")
+        for answered, colour, name, opacity in (
+            (True, SNOWFLAKE_BLUE, "answered", 0.62),
+            (False, FLAG_RED, "refused", 0.62),
+        ):
+            part = sub[(sub["people"] >= floor) == answered]
+            if not len(part):
+                continue
+            show = not (seen_answered if answered else seen_refused)
+            if answered:
+                seen_answered = True
+            else:
+                seen_refused = True
+            fig.add_scatter(
+                x=part["people"],
+                y=[label] * len(part),
+                mode="markers",
+                marker=dict(size=9, color=colour, opacity=opacity,
+                            line=dict(width=1, color="#FFFFFF")),
+                name=name, legendgroup=name, showlegend=show,
+                customdata=part[["district", "programme_code", "month_key",
+                                 "total_usd"]],
+                hovertemplate=(
+                    "%{customdata[0]} &middot; %{customdata[1]}"
+                    " &middot; %{customdata[2]}"
+                    "<br>%{x:,} people &middot; $%{customdata[3]:,.0f}"
+                    "<extra></extra>"
+                ),
+            )
+
+    fig.add_vline(x=floor, line=dict(color=INK, width=1.5))
+    fig.add_annotation(
+        x=math.log10(floor), y=1.0, xref="x", yref="paper",
+        text=f"the floor: {floor} people", showarrow=False,
+        xanchor="left", yanchor="bottom", xshift=6,
+        font=dict(family=FONT, size=11, color=INK),
+    )
+
+    if marker_at:
+        fig.add_vline(
+            x=max(marker_at, 1),
+            line=dict(color=CONFIRMED_GREEN, width=1.5, dash="dot"),
+        )
+        fig.add_annotation(
+            x=math.log10(max(marker_at, 1)), y=-0.02, xref="x", yref="paper",
+            text="your question", showarrow=False,
+            xanchor="right", yanchor="top", xshift=-6,
+            font=dict(family=FONT, size=11, color=CONFIRMED_GREEN),
+        )
+
+    fig = style_fig(fig, height=height, legend=True)
+    fig.update_layout(margin=dict(l=8, r=8, t=46, b=8))
+    top = float(df["people"].max() or 10)
+    fig.update_xaxes(
+        type="log", range=[-0.08, math.log10(top) + 0.12],
+        tickmode="array",
+        tickvals=[1, 3, 10, 30, 100, 300, 1000, 3000, 10000],
+        ticktext=["1", "3", "10", "30", "100", "300", "1,000", "3,000",
+                  "10,000"],
+        title=dict(text="people behind the question",
+                   font=dict(family=FONT, size=12, color=TEXT_MUTED)),
+    )
+    fig.update_yaxes(type="category", categoryorder="array",
+                     categoryarray=[NARROWING.get(d, str(d)) for d in rows],
+                     autorange="reversed")
+    return fig
+
+
+def narrowing_ladder(df, floor: int, *, height: int = 260) -> go.Figure:
+    """How many of the questions at each depth get an answer.
+
+    The companion to the landscape: the same 613 questions counted rather
+    than plotted, so the collapse from "nearly all of them" to "none of
+    them" is a number as well as a shape.
+    """
+    rows = sorted(set(int(v) for v in df["filters_applied"]))
+    labels, answered, refused = [], [], []
+    for depth in rows:
+        sub = df[df["filters_applied"] == depth]
+        labels.append(NARROWING.get(depth, f"{depth} filters"))
+        answered.append(int((sub["people"] >= floor).sum()))
+        refused.append(int((sub["people"] < floor).sum()))
 
     fig = go.Figure()
-    fig.add_scatter(
-        x=df["cohort"], y=df["true_value"], mode="lines",
-        line=dict(color=INK, width=2, dash="dot"),
-        name="true value",
-        hovertemplate="cohort %{x}: %{y:,.0f}<extra></extra>",
-    )
-    fig.add_scatter(
-        x=answered["cohort"], y=answered["released_value"], mode="lines",
-        line=dict(color=CONFIRMED_GREEN, width=3),
-        name="released, exactly",
-        hovertemplate="cohort %{x}: %{y:,.0f} released<extra></extra>",
-    )
-    if len(refused):
-        # Plotted at the value that WOULD have been released, not at zero.
-        # At zero they vanish under an eight-million-dollar axis, and the
-        # point of the chart is that these answers exist and are withheld,
-        # not that they are small.
-        fig.add_scatter(
-            x=refused["cohort"], y=refused["true_value"], mode="markers",
-            marker=dict(size=8, color=FLAG_RED, symbol="x",
-                        line=dict(width=1.5)),
-            name="refused",
-            hovertemplate="cohort %{x}: refused<extra></extra>",
+    for name, values, colour in (
+        ("answered", answered, SNOWFLAKE_BLUE),
+        ("refused", refused, FLAG_RED),
+    ):
+        fig.add_bar(
+            y=labels, x=values, orientation="h", name=name,
+            marker=dict(color=colour),
+            hovertemplate="%{y}<br>%{x:,} " + name + "<extra></extra>",
         )
-    # The floor is drawn as a TRACE, not as a shape.
-    #
-    # Plotly places shapes on a logarithmic axis in log units, but does
-    # not apply that rule consistently between add_vline and add_vrect,
-    # so the line and the band landed in two different wrong places. A
-    # trace is always in data coordinates whatever the axis type, and it
-    # earns a legend entry, which is where the floor belongs anyway.
-    lo = float(min(df["true_value"].min(), 1))
-    hi = float(df["true_value"].max()) * 1.4
-    fig.add_scatter(
-        x=[floor, floor], y=[lo, hi], mode="lines",
-        line=dict(color=FLAG_RED, width=2),
-        name=f"floor: {floor:.0f} beneficiaries",
-        hovertemplate=f"below {floor:.0f} nothing is released<extra></extra>",
+    fig.add_bar(
+        y=labels, x=[0] * len(labels), orientation="h",
+        marker=dict(color="rgba(0,0,0,0)"), showlegend=False,
+        text=[f"{a:,} of {a + r:,}" for a, r in zip(answered, refused)],
+        textposition="outside",
+        textfont=dict(family=FONT, size=11, color=TEXT_MUTED),
+        cliponaxis=False, constraintext="none", hoverinfo="skip",
     )
-    fig.update_xaxes(type="log", title=dict(
-        text="cohort size", font=dict(family=FONT, size=12, color=TEXT_MUTED)))
-    # Both axes logarithmic, or the small cohorts, which are the entire
-    # subject of the chart, are crushed against the axis by the large ones.
-    fig.update_yaxes(type="log", title=dict(
-        text="value", font=dict(family=FONT, size=12, color=TEXT_MUTED)))
-    return style_fig(fig, height=340, legend=True)
+    fig = style_fig(fig, height=height, legend=True)
+    fig.update_layout(barmode="stack", bargap=0.38, legend_traceorder="normal")
+    fig.update_yaxes(autorange="reversed")
+    top = max(a + r for a, r in zip(answered, refused))
+    fig.update_xaxes(range=[0, top * 1.24], separatethousands=True,
+                     showgrid=True, gridcolor="#F0F2F4",
+                     title=dict(text="questions that can be asked",
+                                font=dict(family=FONT, size=11,
+                                          color=TEXT_MUTED)))
+    return fig
+
+
+def differencing_bars(demo, *, height: int = 260) -> go.Figure:
+    """Two permitted questions, and the gap between them.
+
+    The attack a cohort floor cannot stop, drawn rather than described in
+    three bullet points. Both bars clear the floor; the sliver between
+    their ends is a group that never had to clear anything.
+    """
+    a = demo["group_a"]
+    b = demo["group_b"]
+    gap = demo["difference_people"]
+    floor = demo["floor"]
+
+    fig = go.Figure()
+    fig.add_bar(
+        y=["everyone in scope", "those above the threshold"],
+        x=[a["cohort"], b["cohort"]], orientation="h",
+        marker=dict(color=[SNOWFLAKE_BLUE, SNOWFLAKE_BLUE]),
+        text=[f"{a['cohort']:,} people", f"{b['cohort']:,} people"],
+        textposition="inside", insidetextanchor="end",
+        textfont=dict(family=FONT, size=12, color="#FFFFFF"),
+        name="permitted", showlegend=False,
+        hovertemplate="%{y}<br>%{x:,} people<extra></extra>",
+    )
+    fig.add_vline(x=floor, line=dict(color=INK, width=1.5, dash="dot"))
+    fig.add_annotation(
+        x=floor, y=1.0, xref="x", yref="paper",
+        text=f"floor: {floor}", showarrow=False,
+        xanchor="left", yanchor="bottom", xshift=5,
+        font=dict(family=FONT, size=11, color=INK),
+    )
+    # The gap itself, drawn where it sits: between the two bar ends.
+    fig.add_shape(
+        type="rect", x0=b["cohort"], x1=a["cohort"], y0=-0.44, y1=1.44,
+        fillcolor="rgba(229,72,77,0.14)", line=dict(color=FLAG_RED, width=1),
+        layer="above",
+    )
+    fig.add_annotation(
+        x=(a["cohort"] + b["cohort"]) / 2, y=1.0, xref="x", yref="paper",
+        text=f"{gap} people, never asked about", showarrow=False,
+        xanchor="center", yanchor="bottom",
+        font=dict(family=FONT, size=11, color=FLAG_RED),
+    )
+    fig = style_fig(fig, height=height)
+    fig.update_layout(bargap=0.45, margin=dict(l=8, r=8, t=44, b=8))
+    fig.update_yaxes(autorange="reversed")
+    fig.update_xaxes(range=[0, a["cohort"] * 1.08], separatethousands=True,
+                     showgrid=True, gridcolor="#F0F2F4",
+                     title=dict(text="people in the group",
+                                font=dict(family=FONT, size=11,
+                                          color=TEXT_MUTED)))
+    return fig
 
 
 def query_log(df, floor: float) -> go.Figure:
