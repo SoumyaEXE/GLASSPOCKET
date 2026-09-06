@@ -5,8 +5,24 @@
 # BEFORE the first commit, not after. If a key is ever exposed, rotate it
 # and note the rotation in the README rather than quietly rewriting history.
 
-# 
+# THE WRITING SYSTEM. Never commit any of this.
+#
+# algorithm_blog/ holds the DEV.to ranking manual, the Forem pre-flight
+# script and its pinned baseline, the post template, the two prior posts
+# that won, and every draft written from them. The directory entry alone
+# is enough; the patterns under it are belt and braces so a draft that
+# gets moved out of the directory is still refused.
 algorithm_blog/
+algorithm_blog/**
+AGENTS.md
+POST-TEMPLATE.md
+.forem-baseline
+forem-algo-check.sh
+FERVOR.md
+TELLTAIL.md
+*-POST.md
+*-DRAFT.md
+draft*.md
 .env
 .env.*
 !.env.example
