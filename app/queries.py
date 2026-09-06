@@ -1390,11 +1390,160 @@ Q_DISTRICT_LADDER = Query(
 )
 
 
+# ===========================================================================
+# TAB 05 / The Wall
+# ===========================================================================
 #
-# The two statements below are the whole point of the tab. They are
-# identical except for the object they read, and that is the entire
-# difference between an answer that protects a person and one that does
-# not. The protected side runs as GP_ANALYST so the policy applies.
+# One question, asked of three objects that hold identical facts and
+# differ only in the policy attached to them:
+#
+#   PRIVILEGED.V_BENEFICIARY_OUTCOMES_TRUE   nothing, exact
+#   SERVING.V_BENEFICIARY_OUTCOMES           aggregation policy, k = 50
+#   SERVING.V_BENEFICIARY_DP                 privacy policy, epsilon 0.1
+#
+# The parameterised aggregates are issued from app/data.py rather than
+# named here, because each one has to run under a different role with
+# different secondary-role handling, and a Query in this file carries a
+# statement rather than a session. Everything that is a plain read lives
+# here.
+
+Q_PRIVACY_MECHANISMS = Query(
+    sql="""
+        SELECT object_name, mechanism, label, min_group_size,
+               epsilon_per_query, budget_limit, note
+        FROM SERVING.V_PRIVACY_MECHANISMS
+        LIMIT 10
+    """,
+    local="""
+        SELECT 'PRIVILEGED.V_BENEFICIARY_OUTCOMES_TRUE' AS object_name,
+               'none' AS mechanism, 'the counterfactual' AS label,
+               0 AS min_group_size,
+               CAST(NULL AS DOUBLE) AS epsilon_per_query,
+               CAST(NULL AS DOUBLE) AS budget_limit,
+               'Exact. In the warehouse this is readable only by a '
+               || 'privileged role.' AS note
+        UNION ALL
+        SELECT 'SERVING.V_BENEFICIARY_OUTCOMES', 'AGGREGATION_POLICY',
+               'minimum cohort guarantee', 50, NULL, NULL,
+               'Refuses any aggregate over fewer than fifty '
+               || 'beneficiaries and releases everything else exactly.'
+        UNION ALL
+        SELECT 'SERVING.V_BENEFICIARY_DP', 'PRIVACY_POLICY',
+               'differential privacy', 0, 0.1, 300,
+               'Never refuses and never answers exactly.'
+    """,
+    note=(
+        "The three regimes the tab compares, read from the warehouse "
+        "rather than written into the interface, so a policy that is "
+        "detached in Snowflake cannot keep being described here."
+    ),
+)
+
+Q_COHORT_FLOOR = Query(
+    sql="""
+        SELECT min_group_size, mechanism, guarantee_label, guarantee_note
+        FROM SERVING.V_COHORT_FLOOR
+        LIMIT 1
+    """,
+    local="""
+        SELECT 50 AS min_group_size,
+               'AGGREGATION_POLICY' AS mechanism,
+               'minimum cohort guarantee' AS guarantee_label,
+               'Snowflake refuses any aggregate over fewer than fifty '
+               || 'beneficiaries. This is k-anonymity, not differential '
+               || 'privacy: it adds no noise and has no query budget.'
+                 AS guarantee_note
+    """,
+)
+
+Q_FILTER_OPTIONS = Query(
+    sql="""
+        SELECT DISTINCT district, programme_code, month_key
+        FROM MARTS.BENEFICIARY_FACTS
+        LIMIT 2000
+    """,
+    local="SELECT DISTINCT district, programme_code, month_key FROM beneficiary_facts",
+)
+
+#: Every question the three filters can ask, and the cohort behind each.
+#:
+#: Eight GROUPING SETS in one statement. GROUPING() returns 1 for a
+#: column the set aggregated away, so 3 minus the sum of the three is the
+#: number of filters that question actually applies. Over forty
+#: districts, six programmes and five months that is 1,328 rows: one
+#: unfiltered, 51 at one filter, 434 at two and 842 at all three.
+#:
+#: THE LIMIT IS 2000 AND IT MATTERS. It was 800 when the corpus held
+#: sixteen districts and produced 613 rows. Widening the map to forty
+#: pushed the result past the limit, and a truncated landscape would
+#: have silently dropped the deepest questions, which are exactly the
+#: ones the chart exists to show.
+#:
+#: This reads the PRIVILEGED twin, and it has to. The point of the chart
+#: it feeds is to show the refused questions beside the permitted ones,
+#: and a protected view cannot report a refused question by
+#: construction: that is what being refused means.
+_LANDSCAPE_BODY = """
+        SELECT COALESCE(district, 'any')                        AS district,
+               COALESCE(programme_code, 'any')                  AS programme_code,
+               COALESCE(month_key, 'any')                       AS month_key,
+               3 - (GROUPING(district) + GROUPING(programme_code)
+                    + GROUPING(month_key))                      AS filters_applied,
+               COUNT(DISTINCT beneficiary_id)                   AS people,
+               COUNT(*)                                         AS records,
+               SUM(amount_usd)                                  AS total_usd
+        FROM {source}
+        GROUP BY GROUPING SETS (
+            (),
+            (district), (programme_code), (month_key),
+            (district, programme_code), (district, month_key),
+            (programme_code, month_key),
+            (district, programme_code, month_key)
+        )
+        ORDER BY filters_applied, people DESC
+        LIMIT 2000
+"""
+
+Q_COHORT_LANDSCAPE = Query(
+    sql=_LANDSCAPE_BODY.format(source="PRIVILEGED.V_BENEFICIARY_OUTCOMES_TRUE"),
+    local=_LANDSCAPE_BODY.format(source="beneficiary_facts"),
+    note=(
+        "Every question Tab 05 can be asked, and how many people are "
+        "behind each one. It replaces a chart that multiplied an "
+        "imaginary range of cohort sizes by a hard-coded 780 dollars a "
+        "head and drew the product. That illustrated the rule. This "
+        "measures it."
+    ),
+)
+
+#: The re-identification frontier, and the reason the floor has to be
+#: as blunt as it is.
+#:
+#: District, programme and month are quasi-identifiers: none of them
+#: names anybody, and the three together very often do. This counts how
+#: many distinct people sit in each combination, which is the k of
+#: k-anonymity measured on the microdata rather than asserted by a
+#: policy. The answer on this corpus is that 202 combinations hold
+#: exactly one person.
+_QI_BODY = """
+        SELECT district, programme_code, month_key,
+               COUNT(DISTINCT beneficiary_id) AS k,
+               COUNT(*)                       AS records
+        FROM {source}
+        GROUP BY district, programme_code, month_key
+        ORDER BY k
+        LIMIT 2000
+"""
+
+Q_QI_CELLS = Query(
+    sql=_QI_BODY.format(source="PRIVILEGED.V_BENEFICIARY_OUTCOMES_TRUE"),
+    local=_QI_BODY.format(source="beneficiary_facts"),
+    note=(
+        "Cell sizes over the quasi-identifier. Privileged, for the same "
+        "reason as the landscape: a cell of one is precisely what a "
+        "protected view will not report."
+    ),
+)
 
 
 # ===========================================================================
