@@ -94,6 +94,20 @@ USE DATABASE GLASSPOCKET;
 --   MAX_BUDGET_PER_AGGREGATE  per-query epsilon, so 3,000 queries at
 --                             0.1 exhaust a limit of 300
 -- ---------------------------------------------------------------------
+-- A policy that is attached to an object cannot be replaced, so a re-run
+-- has to detach it first. Wrapped because on a first run there is
+-- nothing attached and nothing to detach.
+EXECUTE IMMEDIATE $$
+BEGIN
+  ALTER VIEW GLASSPOCKET.SERVING.V_BENEFICIARY_DP
+    DROP PRIVACY POLICY GLASSPOCKET.SERVING.beneficiary_dp_policy;
+  RETURN 'detached the existing privacy policy so it can be replaced';
+EXCEPTION
+  WHEN OTHER THEN
+    RETURN 'nothing attached yet, first run';
+END;
+$$;
+
 CREATE OR REPLACE PRIVACY POLICY GLASSPOCKET.SERVING.beneficiary_dp_policy
   AS () RETURNS PRIVACY_BUDGET ->
   PRIVACY_BUDGET(BUDGET_NAME              => 'gp_analysts',
@@ -143,15 +157,14 @@ DECLARE
                                      'month_key', 'cause');
   col  STRING;
   vals STRING;
-  q    STRING DEFAULT CHR(39);
+
 BEGIN
   FOR i IN 0 TO ARRAY_SIZE(cols) - 1 DO
     col := GET(:cols, i)::STRING;
     EXECUTE IMMEDIATE
-      'SELECT LISTAGG(DISTINCT ' || :q || :q || :q || ' || REPLACE('
-      || col || ', ' || :q || :q || :q || ', ' || :q || :q || :q || :q
-      || :q || ') || ' || :q || :q || :q || ', ' || :q || ', ' || :q
-      || ') FROM GLASSPOCKET.MARTS.BENEFICIARY_FACTS';
+      'SELECT LISTAGG(DISTINCT CHR(39) || REPLACE(' || col
+      || ', CHR(39), CHR(39) || CHR(39)) || CHR(39), '', '') '
+      || 'FROM GLASSPOCKET.MARTS.BENEFICIARY_FACTS';
     SELECT * INTO :vals FROM TABLE(RESULT_SCAN(LAST_QUERY_ID()));
     EXECUTE IMMEDIATE
       'ALTER VIEW GLASSPOCKET.SERVING.V_BENEFICIARY_DP MODIFY COLUMN '
