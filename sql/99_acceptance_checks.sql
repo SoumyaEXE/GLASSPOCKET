@@ -109,6 +109,23 @@ SELECT 'PRV-05', 'privacy',
              WHERE guarantee_label = 'minimum cohort guarantee'
                AND guarantee_note ILIKE '%not differential privacy%') = 1,
            'PASS', 'FAIL')
+UNION ALL
+-- PRV-06 exists because PRV-05 alone would now pass on a build that had
+-- quietly lost its privacy policy: PRV-05 only asserts that the COHORT
+-- floor is honestly labelled, and that stays true whether or not the DP
+-- view is attached. The Wall claims differential privacy on screen, so
+-- something has to fail when the object behind that claim is gone.
+SELECT 'PRV-06', 'privacy',
+       'A differential privacy policy is attached to the DP serving view',
+       IFF((SELECT COUNT(*) FROM TABLE(
+              INFORMATION_SCHEMA.POLICY_REFERENCES(
+                REF_ENTITY_NAME   => 'GLASSPOCKET.SERVING.V_BENEFICIARY_DP',
+                REF_ENTITY_DOMAIN => 'VIEW'))
+             WHERE POLICY_KIND = 'PRIVACY_POLICY'
+               AND POLICY_STATUS = 'ACTIVE'
+               AND UPPER(COALESCE(REF_ARG_COLUMN_NAMES::STRING, ''))
+                   LIKE '%BENEFICIARY_ID%') > 0,
+           'PASS', 'FAIL')
 
 -- ======================== SNOWFLAKE SURFACE ==========================
 

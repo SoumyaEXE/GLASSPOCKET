@@ -183,14 +183,16 @@ def craft() -> None:
         all("provenance_footer(" in p.read_text(encoding="utf-8")
             for p in (app / "tabs").glob("tab_*.py")),
     )
-    # Nine, since The Wall and Method And Honesty were removed. The count
-    # is still asserted rather than left loose, so a tab going missing by
+    # Ten. Method And Honesty is still gone; The Wall came back once the
+    # differential privacy DDL turned out to be a syntax error in this
+    # build's own probe rather than a missing platform feature. The count
+    # is asserted rather than left loose, so a tab going missing by
     # accident fails the build; it just has to be updated deliberately
-    # when one goes on purpose.
+    # when one goes or arrives on purpose.
     check(
         "CRF-06", "craft",
-        "Nine tab modules exist",
-        len(list((app / "tabs").glob("tab_*.py"))) == 9,
+        "Ten tab modules exist",
+        len(list((app / "tabs").glob("tab_*.py"))) == 10,
     )
 
     # No inline SQL in a tab module. Section 04, CONVENTION.
@@ -233,30 +235,45 @@ def craft() -> None:
         not unbounded,
     )
 
-    # The build must not claim a guarantee the platform did not give it.
-    # It ships a minimum-cohort floor, so it may name differential privacy
-    # only to say it is NOT what is running. This used to read Tab 05
-    # alone; with that tab removed the phrase can turn up anywhere, so the
-    # check sweeps every tab rather than the one that used to own it.
-    contrast = ("not ", "rather than", "does not", "unavailable", "no ",
-                "instead", "difference", "cannot", "would", "specif",
-                "defends", "fallback")
-    claims = []
+    # THE PREMISE OF THIS CHECK CHANGED, SO THE CHECK CHANGED WITH IT.
+    #
+    #   It used to read: no tab may say "differential privacy" except to
+    #   say it is NOT what is running, because the build shipped a
+    #   minimum-cohort floor after the DP DDL failed to parse. That DDL
+    #   failed because it was malformed rather than unsupported. Written
+    #   correctly it attaches, and sql/11b_differential_privacy.sql is
+    #   the deployed proof.
+    #
+    #   Deleting the guard would be the wrong response, because the thing
+    #   it protects is still worth protecting: the interface must not
+    #   name a guarantee unless the object carrying it is named beside
+    #   the claim, so a reader can go and check. So the check inverts.
+    #   Any tab that says "differential privacy" must also name
+    #   V_BENEFICIARY_DP, and no tab may attach the phrase to the
+    #   aggregation policy, which is k-anonymity and is not it.
+    misattributed = []
     for path in sorted((app / "tabs").glob("tab_*.py")):
-        lines_ = path.read_text(encoding="utf-8").splitlines()
+        text = path.read_text(encoding="utf-8")
+        if "differential privacy" not in text.lower():
+            continue
+        if "v_beneficiary_dp" not in text.lower():
+            misattributed.append(f"{path.name}: names DP without the object")
+        lines_ = text.splitlines()
         for idx, line in enumerate(lines_):
-            if "differential privacy" not in line.lower():
+            low = line.lower()
+            if "min_group_size" not in low and "cohort floor" not in low:
                 continue
             # The window is needed because the copy wraps across several
-            # source lines and the contrast often sits on a neighbour.
-            window = "\n".join(lines_[max(0, idx - 4): idx + 5]).lower()
-            if not any(t in window for t in contrast):
-                claims.append(f"{path.name}: {line.strip()}")
+            # source lines and the disclaimer often sits on a neighbour.
+            window = "\n".join(lines_[max(0, idx - 2): idx + 3]).lower()
+            if "differential privacy" in window and "not" not in window:
+                misattributed.append(
+                    f"{path.name}: the floor described as DP, line {idx + 1}")
     check(
         "CRF-11", "craft",
-        f"No tab claims differential privacy"
-        f"{' (' + claims[0][:60] + ')' if claims else ''}",
-        not claims,
+        f"Every differential privacy claim names the object that carries it"
+        f"{' (' + misattributed[0][:60] + ')' if misattributed else ''}",
+        not misattributed,
     )
     # The disclosure moved to The Brief when Method And Honesty was
     # removed, because the banner on every screen promises it. The check
@@ -350,8 +367,8 @@ def hygiene() -> None:
 
     check(
         "REP-01", "repo",
-        "All fifteen numbered SQL files exist",
-        len(list((ROOT / "sql").glob("*.sql"))) == 15,
+        "All sixteen numbered SQL files exist",
+        len(list((ROOT / "sql").glob("*.sql"))) == 16,
     )
     check(
         "REP-02", "repo",

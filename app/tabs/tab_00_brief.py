@@ -105,10 +105,14 @@ REAL_VERSUS_SEEDED = [
      "Genuinely minted and independently verifiable",
      "Solana devnet, not mainnet"),
     ("Privacy guarantee",
-     "A real Snowflake aggregation policy enforcing a minimum cohort of "
-     "50, attached to a terminal serving view with an entity key",
-     "A minimum-cohort guarantee, NOT differential privacy. The DP DDL "
-     "does not parse on this deployment. No noise, no query budget."),
+     "Two real Snowflake policies over the same facts: an aggregation "
+     "policy with a minimum cohort of 50, and a privacy policy on "
+     "SERVING.V_BENEFICIARY_DP with a 0.1 epsilon budget. Both carry an "
+     "entity key on beneficiary_id",
+     "The cohort floor is NOT differential privacy: no noise, no budget. "
+     "The DP view is, and it shipped late, because this build first "
+     "recorded the feature as absent on the strength of two malformed "
+     "statements. The Wall shows both and says so."),
     ("Embeddings",
      "Genuine snowflake-arctic-embed-m vectors in a VECTOR(FLOAT, 768) "
      "column; all similarity search runs in Snowflake",
@@ -124,8 +128,12 @@ REAL_VERSUS_SEEDED = [
 #: to discover, because a limitation you have to find is a limitation you
 #: were hoping nobody would look for.
 LIMITATIONS = [
-    "The privacy layer is a minimum-cohort floor, not differential "
-    "privacy. It refuses to answer about fewer than fifty beneficiaries, "
+    "The privacy budget on SERVING.V_BENEFICIARY_DP is set too high to "
+    "stop the attack it exists to stop. Recovering the smallest group "
+    "the cohort floor leaks takes roughly 660 queries; the limit "
+    "permits 3,000. The Wall does that arithmetic on screen.",
+    "The cohort floor is not differential privacy and is not presented "
+    "as it. It refuses to answer about fewer than fifty beneficiaries, "
     "but it adds no noise and has no budget, so two permitted large "
     "queries can be subtracted to learn about a handful of people.",
     "It cannot prove intent. A high similarity score is a reason to look "
@@ -260,7 +268,9 @@ STAGES = (
             "counted as distinct people. It is not differential privacy: "
             "it adds no noise and has no query budget, so two permitted "
             "large queries can be subtracted to learn about a handful of "
-            "people. That limitation is listed above with the others.",
+            "people. SERVING.V_BENEFICIARY_DP carries the real thing "
+            "beside it, under a privacy policy with an epsilon budget, "
+            "and The Wall runs the same attack through both.",
         ),
     },
     {
@@ -727,12 +737,12 @@ def render() -> None:
             C.note("&mdash; " + item)
         C.source_note(
             "A limitation a reader has to find is a limitation somebody "
-            "was hoping they would not look for. The privacy substitution "
-            "in particular is a real gap: the differential privacy DDL "
-            "this build wanted does not parse on this deployment, the "
-            "aggregation policy that shipped instead is a weaker "
-            "guarantee, and docs/platform_constraints.md carries the "
-            "attempt and the error it returned."
+            "was hoping they would not look for. The first item is the "
+            "one this build got wrong twice: it shipped without "
+            "differential privacy on the strength of two statements that "
+            "were malformed rather than unsupported, and then shipped it "
+            "with a budget set above the cost of the attack. Both are on "
+            "The Wall, with the arithmetic."
         )
 
     C.section("What this system does about it")

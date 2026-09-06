@@ -55,6 +55,7 @@ from tabs import (                           # noqa: E402
     tab_02_graph,
     tab_03_money,
     tab_04_last_mile,
+    tab_05_wall,
     tab_06_receipt,
     tab_07_historian,
     tab_08_ask,
@@ -62,29 +63,33 @@ from tabs import (                           # noqa: E402
 )
 
 #: The narrative spine, in order: (number, name, one-line move, module).
-#: Section 09 named 05, 01 and 06 as the submission. The Wall has since
-#: been cut along with Method And Honesty, so 01 and 06 carry it: the
-#: detector that tells real from imitation, and the receipt that lets you
-#: check the claim without trusting this application.
+#: Section 09 names 05, 01 and 06 as the submission: the privacy layer,
+#: the detector that tells real from imitation, and the receipt that lets
+#: you check a claim without trusting this application.
+#:
+#: The Wall was cut two days before submission and is back, because the
+#: reason it was cut turned out to be a syntax error in this build's own
+#: probe rather than a missing platform feature. It now carries three
+#: governance regimes over one set of facts instead of two.
 #:
 #: The numbers are the position in the argument, not a stable identifier.
 #: They renumber when a tab is added or removed, because a rail that
-#: reads 00, 01, 02, 03, 04, 06, 07, 08, 09 invites the reader to hunt
-#: for a 05 that is not coming back.
+#: skips one invites a reader to hunt for the gap.
 TABS = [
     ("00", "The Brief",            "the stakes, with sources",      tab_00_brief),
     ("01", "Give With Confidence", "telling real from imitation",   tab_01_confidence),
     ("02", "The Trust Graph",      "imitation as a structure",      tab_02_graph),
     ("03", "Follow The Money",     "where aid actually landed",     tab_03_money),
     ("04", "The Last Mile",        "where the gap opens",           tab_04_last_mile),
-    ("05", "The Receipt",          "verify without trusting us",    tab_06_receipt),
-    ("06", "The Historian",        "the record cannot be rewritten", tab_07_historian),
-    ("07", "Ask The Warehouse",    "questions in plain language",   tab_08_ask),
-    ("08", "Where A Dollar Lands", "who to give to",                tab_09_dollar),
+    ("05", "The Wall",             "attack the privacy layer",      tab_05_wall),
+    ("06", "The Receipt",          "verify without trusting us",    tab_06_receipt),
+    ("07", "The Historian",        "the record cannot be rewritten", tab_07_historian),
+    ("08", "Ask The Warehouse",    "questions in plain language",   tab_08_ask),
+    ("09", "Where A Dollar Lands", "who to give to",                tab_09_dollar),
 ]
 
 def _sidebar() -> int:
-    """The left rail: identity, the nine moves, one status line.
+    """The left rail: identity, the ten moves, one status line.
 
     Returns the index of the selected move.
 

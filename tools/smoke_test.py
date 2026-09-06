@@ -109,12 +109,12 @@ def main() -> int:
             print("  MISSING   the gap is not reported in words after the reveal")
             problems += 1
 
-    # The Wall used to be walked here, between the reveal and the tamper.
-    # It has been removed along with Method And Honesty, so the rail is
-    # nine entries and The Historian has moved from position 7 to 6.
-    # Positions are resolved from the rail rather than hard-coded, so
-    # that the next tab to move does not silently skip its own test the
-    # way renaming the apply button once did.
+    # The Wall is walked here, between the reveal and the tamper, which
+    # is where it sits in the argument: the system refusing, between the
+    # system finding and the system being checked. Positions are resolved
+    # from the rail by name rather than hard-coded, so the next tab to
+    # move does not silently skip its own test the way renaming the apply
+    # button once did.
     def goto_named(name: str) -> bool:
         entries = [b for b in at.button if b.key and b.key.startswith("gp_nav_")]
         for index, entry in enumerate(entries):
@@ -122,6 +122,22 @@ def main() -> int:
                 goto(index)
                 return True
         return False
+
+    if not goto_named("The Wall"):
+        print("  MISSING   The Wall is not on the rail")
+        problems += 1
+    else:
+        problems += _problems(at, "tab 05 wall")
+        print(f"\nthe wall         charts {_charts(at)}")
+        # The tab's whole argument is that three regimes answer the same
+        # question differently. If any one of the three cards is absent
+        # the comparison has silently become a claim.
+        page = " ".join(m.value for m in at.markdown)
+        for phrase in ("no policy", "aggregation policy",
+                       "differential privacy"):
+            if phrase not in page.lower():
+                print(f"  MISSING   the wall does not show '{phrase}'")
+                problems += 1
 
     if not goto_named("The Historian"):
         print("  MISSING   The Historian is not on the rail")

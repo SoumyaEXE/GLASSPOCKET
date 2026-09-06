@@ -317,17 +317,37 @@ def compare_columns(
         concerned, and everything after it returns as escaped source. See
         ``table`` for the same trap.
     """
+    compare_row(dict(left, tone=left_tone), dict(right, tone=right_tone))
+
+
+def compare_row(*sides: dict) -> None:
+    """The same card row, for any number of sides.
+
+    The Wall needs three: the unprotected answer, the answer through a
+    cohort floor and the answer through a privacy budget. The grid is
+    already ``repeat(auto-fit, minmax(260px, 1fr))``, so it takes two or
+    three without a second rule, and the cards still stretch to the
+    tallest in the row.
+
+    Each side takes ``label``, ``value``, optional ``tone`` (truth,
+    noise, dp) and a caption as either ``sub`` (escaped) or ``sub_html``
+    (not, for a caption that needs a line break or a code span).
+    Emitted as one line, for the reason in ``compare_columns``: a blank
+    line inside a block of HTML ends the block as far as the markdown
+    parser is concerned.
+    """
     cards = []
-    for side, tone in ((left, left_tone), (right, right_tone)):
+    for side in sides:
+        tone = side.get("tone", "truth")
         value_class = "gp-compare-value"
-        if tone == "noise":
-            value_class += " gp-compare-value-noise"
-        sub = side.get("sub", "")
+        if tone in ("noise", "dp"):
+            value_class += f" gp-compare-value-{tone}"
+        sub = side.get("sub_html") or _esc(side.get("sub", ""))
         cards.append(
             f'<div class="gp-compare gp-compare-{tone}">'
             f'<div class="gp-compare-label">{_esc(side.get("label", ""))}</div>'
             f'<div class="{value_class}">{_esc(side.get("value", ""))}</div>'
-            + (f'<div class="gp-compare-sub">{_esc(sub)}</div>' if sub else "")
+            + (f'<div class="gp-compare-sub">{sub}</div>' if sub else "")
             + "</div>"
         )
     st.markdown(f'<div class="gp-compare-row">{"".join(cards)}</div>',

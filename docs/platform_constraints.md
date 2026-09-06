@@ -29,7 +29,14 @@ why the assertion in `sql/00_account_setup.sql` now probes retention instead.)
 
 ---
 
-## Constraint 1: differential privacy DDL is not available
+## Constraint 1: RETRACTED. This was a syntax error, not a constraint
+
+**The finding recorded here was wrong, and it was the most consequential
+finding in the file.** It is kept in full rather than deleted, because a
+document whose whole claim is "everything here comes from running the
+statement" has to show what happens when that method fails.
+
+### What was recorded
 
 ```
 CREATE PRIVACY BUDGET ...
@@ -39,28 +46,71 @@ ALTER VIEW ... SET PRIVACY POLICY ... ENTITY KEY (id)
   -> SQL compilation error: syntax error at position 36 unexpected 'PRIVACY'.
 ```
 
-The keywords do not parse, so this is not a permissions problem and no grant
-fixes it. The feature is absent from this deployment.
+> The keywords do not parse, so this is not a permissions problem and no grant
+> fixes it. The feature is absent from this deployment.
 
-**Fallback taken, Build Spec Section 10, hour 5.**
+The Section 10 fallback was taken on that basis: Tab 05 was rebuilt against
+`AGGREGATION_CONSTRAINT(MIN_GROUP_SIZE => 50)` and relabelled as a
+minimum-cohort guarantee, and was later cut altogether.
 
-> Fallback: implement the Attacker tab against an aggregation policy with a
-> minimum group size instead, which enforces a real k-anonymity floor and is
-> still a genuine governance feature. Relabel the tab honestly as a
-> minimum-cohort guarantee rather than a differential-privacy guarantee.
-> Document the attempt and the reason in the post.
+### What was actually wrong
 
-So Tab 05 ships against `AGGREGATION_CONSTRAINT(MIN_GROUP_SIZE => 50)`. The
-guarantee it enforces is real and it is enforced by Snowflake, but it is
-k-anonymity, not differential privacy. The tab says so on screen, in its own
-words, and does not use the phrase "differential privacy" about what it is
-doing. The intended differential privacy DDL stays in
-`sql/11_privacy_policy.sql`, commented, so the difference is inspectable.
+Both statements were malformed.
 
-**What is lost.** A minimum group size stops a query that isolates a small
-cohort. It does not add calibrated noise and it has no budget, so it does not
-defend against a sequence of overlapping queries the way differential privacy
-does. Tab 05 states this limitation rather than glossing it.
+- **There is no `CREATE PRIVACY BUDGET` statement in Snowflake.** A budget
+  comes into existence the moment a privacy policy body names one, through
+  `PRIVACY_BUDGET(BUDGET_NAME => ..., BUDGET_LIMIT => ...,
+  MAX_BUDGET_PER_AGGREGATE => ...)`.
+- **The attach clause is `ADD PRIVACY POLICY`, not `SET`.** Replacing one is
+  `DROP PRIVACY POLICY a, ADD PRIVACY POLICY b ENTITY KEY (col)` inside a
+  single `ALTER`, so the object is never briefly unprotected.
+
+A parser error tells you a statement is malformed. It does not tell you a
+feature is missing, and for a weekend this build treated those as the same
+fact. Written in syntax that exists, on the same account and the same
+warehouse, it attaches and it works: see `sql/11b_differential_privacy.sql`.
+
+**A negative result about a platform needs the same evidence as a positive
+one.** This file opens by boasting that every claim in it comes from running
+the statement rather than reading the documentation, and that is exactly
+backwards. Running a statement tells you what *that statement* does. Only the
+documentation tells you whether it was the right statement. Two of the ten
+findings below rested on this error. The other eight are capability messages
+rather than syntax errors, and they stand.
+
+### What the privacy engine then demanded
+
+Attaching the policy was the easy half. Four further refusals, each a real
+constraint:
+
+| Error | Meaning | Resolution |
+|---|---|---|
+| `510242` supported aggregates: COUNT, COUNT_STAR | a column with no declared privacy domain has an infinite one, and infinite domain means infinite noise | every column declares a domain |
+| syntax error on `SET PRIVACY DOMAIN (0, 5000)` | wrong form | ranges are `BETWEEN (0, 5000)`; lists are `IN ('a','b')`; neither takes a subquery |
+| `210007` infinite multiplier | a beneficiary holds up to five rows, so one person can move a row count by five | the query itself must deduplicate: `COUNT(DISTINCT beneficiary_id)`. A `GROUP BY` inside a view is not accepted as proof of one row per entity |
+| possible groups (infinity) must not exceed 10000 | `GROUP BY` over an unbounded key | filter, or group only on domain-declared columns |
+
+The surviving query shape is `COUNT(DISTINCT beneficiary_id)` with filters
+over domain-declared columns, which is exactly the question Tab 05 asks.
+
+### What both guarantees are now worth
+
+Both policies ship, over the same facts, on two views, because a privacy
+policy and an aggregation policy cannot sit on one object. The comparison is
+the point rather than a workaround.
+
+**Measured against the warehouse.** Twenty-five repeats of the unfiltered
+count through the DP view: mean 8,115.4 against a true 8,113, standard
+deviation 9.3. Thirty runs of the differencing pair that the aggregation
+policy answers as exactly 12, every time: mean 14.8, standard deviation 18.2,
+range −27 to +51, four runs returning a negative number of people.
+
+**What is still lost, and it is now our own choice rather than the
+platform's.** `BUDGET_LIMIT` is 300 at 0.1 per aggregate, which permits 3,000
+queries. Grinding the noise down far enough to recover that 12-person group
+takes roughly 660. The budget as configured does not stop the attack it exists
+to stop, and Tab 05 does that arithmetic on screen rather than leaving it
+here.
 
 ---
 

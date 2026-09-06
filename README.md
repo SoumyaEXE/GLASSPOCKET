@@ -66,9 +66,9 @@ they cannot drift. Nothing here is rounded or embellished.
 
 ---
 
-## The eleven tabs
+## The ten tabs
 
-Not a dashboard. An argument in eleven moves.
+Not a dashboard. An argument in ten moves.
 
 | | Tab | The move |
 | --- | --- | --- |
@@ -82,7 +82,12 @@ Not a dashboard. An argument in eleven moves.
 | 07 | The Historian | The record cannot be quietly rewritten |
 | 08 | Ask The Warehouse | Plain-language questions over governed data |
 | 09 | Where A Dollar Lands | Point the viewer toward giving |
-| 10 | Method And Honesty | Declare what is real and what is seeded |
+
+Method And Honesty was removed; its disclosure moved to The Brief, where the
+banner on every screen already promises it. The Wall was removed too, and came
+back: the reason it was cut turned out to be a syntax error in this build's own
+probe rather than a missing platform feature, and it now carries three
+governance regimes over one set of facts instead of two.
 
 Tabs 05, 01 and 06 are the submission. Everything else is amplification.
 
@@ -169,7 +174,8 @@ sql/07_clone_detection.sql        vector similarity and the evasion gap
 sql/08_geospatial_h3.sql          H3 geometry and hex risk
 sql/09_risk_score_udf.sql         the decomposable score
 sql/10_semantic_view.sql          semantic layer
-sql/11_privacy_policy.sql         differential privacy  <-- BUILD THIS FIRST
+sql/11_privacy_policy.sql         aggregation policy  <-- BUILD THIS FIRST
+sql/11b_differential_privacy.sql  privacy policy and epsilon budget
 sql/12_serving_views.sql          terminal serving views
 sql/13_oracle_queue.sql           mint queue and mint log
 sql/99_acceptance_checks.sql      the gate
@@ -261,7 +267,7 @@ inside a data warehouse regardless.
 
 | Feature | Where the judge sees it |
 | --- | --- |
-| Privacy policy, differential privacy | Tab 05, The Wall |
+| Privacy policy with an epsilon budget, and an aggregation policy beside it | Tab 05, The Wall |
 | `AI_EMBED` and `VECTOR_COSINE_SIMILARITY` | Tabs 01 and 02 |
 | `AI_FILTER` as a semantic predicate | Tab 01, confirmation chip |
 | H3 grid functions and `ST_DISTANCE` | Tabs 03 and 04 |
@@ -301,25 +307,23 @@ plus personal data is a harm that cannot be undone.
 | Beneficiary records | Nothing | Entirely synthetic. Handling real beneficiary data here would be unethical. |
 | Attrition rates | Calibrated against published WFP truck figures | Individual delivery events are modelled |
 | On-chain receipts | Genuinely minted and independently verifiable | Solana devnet, not mainnet |
-| Privacy guarantee | A real Snowflake aggregation policy enforcing a minimum cohort of 50, attached to a terminal serving view with an entity key | A **minimum-cohort guarantee, not differential privacy**. The DP DDL does not parse on this deployment. No noise, no query budget. |
+| Privacy guarantee | Two real Snowflake policies over the same facts: an aggregation policy with `MIN_GROUP_SIZE => 50`, and a privacy policy on `SERVING.V_BENEFICIARY_DP` with a 0.1 epsilon budget. Both carry an entity key on `beneficiary_id` | The cohort floor is **not** differential privacy: no noise, no budget. The DP view is, and it shipped late, because this build first recorded the feature as absent on the strength of two malformed statements. |
 | Embeddings | Genuine `snowflake-arctic-embed-m` vectors in a `VECTOR(FLOAT, 768)` column; all similarity search runs in Snowflake | Generated offline, because AI functions are blocked on trial accounts |
 | Clone confirmation | Nothing | `AI_FILTER` is blocked on trial accounts, so confirmation is two SQL predicates; every row carries `confirmation_method = 'HEURISTIC'` |
 
-### What the platform would not give us
+### What the platform would not give us, and what we got wrong about it
 
-Two features this build was designed around are unavailable on the account it
-runs on. Both were found by running the statement, not by reading the docs, and
-both are documented with their exact errors in
+**Differential privacy was recorded as unavailable, and that was our error.**
+`CREATE PRIVACY BUDGET` and `ALTER VIEW ... SET PRIVACY POLICY` were run,
+failed to parse, and were written up as a missing feature. Both statements were
+malformed: there is no `CREATE PRIVACY BUDGET` statement in Snowflake at all —
+a budget is created by being named inside a policy body — and the attach clause
+is `ADD PRIVACY POLICY`, not `SET`. A parser error says a statement is
+malformed. It does not say a feature is missing. Written correctly it attaches
+and it works, in `sql/11b_differential_privacy.sql`, and The Wall renders its
+output live beside the aggregation policy. The full retraction, the four
+further refusals the privacy engine raised, and the measured noise are in
 [`docs/platform_constraints.md`](docs/platform_constraints.md).
-
-**Differential privacy.** `CREATE PRIVACY BUDGET` and
-`ALTER VIEW ... SET PRIVACY POLICY` do not parse on this deployment — the
-keywords are unknown, so no grant fixes it. The account *is* Enterprise Edition:
-it accepts aggregation policies and 90-day Time Travel, both Enterprise-gated.
-Section 10's documented fallback is taken, so Tab 05 ships an aggregation policy
-with `MIN_GROUP_SIZE => 50`, relabelled as a **minimum-cohort guarantee**, and
-that tab demonstrates the differencing attack the substitution leaves open
-rather than hiding it.
 
 **Every AI function.** `AI_EMBED`, `AI_FILTER` and all `SNOWFLAKE.CORTEX.*`
 return *"not available for trial accounts"*. So embeddings are generated offline
@@ -335,10 +339,14 @@ between what was designed and what shipped is inspectable rather than described.
 
 ### What this cannot do
 
-- **The privacy layer is a minimum-cohort floor, not differential privacy.** It
-  refuses to answer about fewer than fifty beneficiaries, but it adds no noise
-  and has no budget, so two permitted large queries can be subtracted to learn
-  about a handful of people.
+- **The privacy budget is set too high to stop the attack it exists to stop.**
+  Recovering the smallest group the cohort floor leaks takes roughly 660
+  queries; `BUDGET_LIMIT => 300` at 0.1 per aggregate permits 3,000. The Wall
+  does that arithmetic on screen.
+- **The cohort floor is not differential privacy and is not presented as it.**
+  It refuses to answer about fewer than fifty beneficiaries, but it adds no
+  noise and has no budget, so two permitted large queries can be subtracted to
+  learn about a handful of people.
 - **It cannot prove intent.** A high similarity score is a reason to look
   closer, never a verdict about a person.
 - **It cannot detect an imitator whose name shares no meaning with its target.**

@@ -354,6 +354,11 @@ div[data-testid="stTextInput"].gp-copy input,
 .gp-compare .gp-compare-sub { margin-top: auto; padding-top: 10px; }
 .gp-compare-truth { border-left: 3px solid #16181D; }
 .gp-compare-noise { border-left: 3px solid #F5A623; }
+/* The Wall runs three cards, not two: the unprotected answer, the answer
+   through a cohort floor and the answer through a privacy budget. The
+   third takes the purple already carrying "computed elsewhere" across
+   the build, so the reader is not asked to learn a fourth accent. */
+.gp-compare-dp { border-left: 3px solid #9945FF; }
 .gp-compare-label {
   font-size: 11px; font-weight: 600; letter-spacing: 0.09em;
   text-transform: uppercase; color: #6B7280; margin-bottom: 12px;
@@ -362,6 +367,11 @@ div[data-testid="stTextInput"].gp-copy input,
   font-size: 28px; font-weight: 700; letter-spacing: -0.03em; color: #08090B;
 }
 .gp-compare-value-noise { color: #9A6410; }
+.gp-compare-value-dp { color: #6D28D9; }
+/* Object names inside a comparison caption. The build has no monospaced
+   face anywhere by rule, so an identifier is marked by weight and colour
+   rather than by a second family. */
+.gp-compare-sub .gp-obj { font-weight: 600; color: #4B5563; }
 .gp-compare-sub { font-size: 13px; color: #6B7280; margin-top: 6px; }
 
 
