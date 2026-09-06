@@ -380,32 +380,44 @@ section[data-testid="stSidebar"] > div {
   padding: 24px 18px 32px 18px;
 }
 
-.gp-rail-brand { margin-bottom: 28px; }
+/* The brand sits above a hairline so the nav reads as one group rather
+   than as items floating under a wordmark. */
+.gp-rail-brand {
+  padding-bottom: 18px; margin-bottom: 14px;
+  border-bottom: 1px solid #EDEFF2;
+}
 .gp-rail-mark {
-  font-size: 17px; font-weight: 700; letter-spacing: -0.02em; color: #08090B;
+  font-size: 15px; font-weight: 700; letter-spacing: 0.01em; color: #08090B;
 }
 .gp-rail-sub {
-  font-size: 11px; font-weight: 500; color: #6B7280;
-  margin-top: 4px; line-height: 1.5;
+  font-size: 11px; font-weight: 450; color: #8A9099;
+  margin-top: 5px; line-height: 1.45; letter-spacing: 0.005em;
 }
 .gp-rail-eyebrow {
   font-size: 10px; font-weight: 600; letter-spacing: 0.11em;
   text-transform: uppercase; color: #9CA3AF;
   margin: 22px 0 10px 0;
 }
-/* The one-line description of the section being read. It is a caption,
-   not a control, so it must not wear a box that makes it look like a
-   text field sitting in the navigation. */
-.gp-rail-move {
-  font-size: 12px; color: #9CA3AF; line-height: 1.5;
-  margin: 14px 2px 4px 2px; font-style: normal;
+/* One status line under the nav, behind a hairline. A dot and two words:
+   the only thing in the rail that is not navigation, because it is the
+   only fact a viewer cannot read off the page itself. */
+.gp-rail-status {
+  display: flex; align-items: center; gap: 7px;
+  margin-top: 20px; padding-top: 14px;
+  border-top: 1px solid #EDEFF2;
+  font-size: 11px; font-weight: 500; color: #8A9099;
+  letter-spacing: 0.01em;
 }
-.gp-rail-state { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
-.gp-rail-state .gp-chip { margin: 0; }
-.gp-rail-foot {
-  font-size: 11px; color: #9CA3AF; line-height: 1.6; margin-top: 24px;
-  padding-top: 16px; border-top: 1px solid #E4E7EB;
+.gp-rail-sep { color: #D3D7DD; }
+.gp-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  flex: 0 0 6px; display: inline-block;
 }
+/* Green reads as connected, amber as a stand-in. Neither is a warning,
+   because neither state is wrong: the rail says which backend answered
+   rather than implying one of them is a failure. */
+.gp-dot-live    { background: #16A46B; box-shadow: 0 0 0 2.5px #16A46B1F; }
+.gp-dot-preview { background: #D99328; box-shadow: 0 0 0 2.5px #D993281F; }
 /* The rail scrolls independently, so its last line is not stranded
    under the viewport edge. */
 section[data-testid="stSidebar"] > div { padding-bottom: 48px; }
@@ -418,36 +430,53 @@ section[data-testid="stSidebar"] > div { padding-bottom: 48px; }
    the version is not ours to pick and a broken selector cannot be
    iterated on. A button is a button in every version. */
 section[data-testid="stSidebar"] .stButton > button {
+  position: relative;
   width: 100%;
   text-align: left;
   justify-content: flex-start;
-  padding: 8px 11px;
-  margin: 0 0 1px 0;
+  padding: 7px 10px 7px 13px;
+  margin: 0 0 2px 0;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: 7px;
   background: transparent;
-  color: #4B5563;
+  color: #565D68;
   font-size: 13px;
   font-weight: 500;
-  font-feature-settings: 'tnum' 1;
+  letter-spacing: 0.004em;
   box-shadow: none;
   min-height: 0;
-  line-height: 1.4;
+  line-height: 1.45;
+  transition: background 110ms ease, color 110ms ease;
+}
+/* The accent rail is drawn on every item at zero height, so the active
+   state grows one rather than inserting a box. Inserting would shift the
+   label by a pixel every time the selection moved. */
+section[data-testid="stSidebar"] .stButton > button::before {
+  content: ""; position: absolute; left: 4px; top: 50%;
+  width: 2px; height: 0; margin-top: 0;
+  border-radius: 1px; background: #0E7FA8;
+  transition: height 130ms ease, margin-top 130ms ease;
 }
 section[data-testid="stSidebar"] .stButton > button:hover {
-  background: #F7F8FA; color: #16181D; border-color: transparent;
+  background: #F4F6F8; color: #16181D; border-color: transparent;
 }
 section[data-testid="stSidebar"] .stButton > button:focus {
   box-shadow: none; outline: none;
 }
+section[data-testid="stSidebar"] .stButton > button:focus-visible {
+  box-shadow: 0 0 0 2px #BEE5F6;
+}
 /* The section being read. Snowflake Blue, because that is what active
    means everywhere else in this interface. */
 section[data-testid="stSidebar"] .stButton > button[kind="primary"] {
-  background: #EAF7FD; border-color: #BEE5F6; color: #0E7FA8;
-  font-weight: 650;
+  background: #F0F8FC; border-color: transparent; color: #0B6E92;
+  font-weight: 600;
+}
+section[data-testid="stSidebar"] .stButton > button[kind="primary"]::before {
+  height: 15px; margin-top: -7.5px;
 }
 section[data-testid="stSidebar"] .stButton > button[kind="primary"]:hover {
-  background: #DFF2FC; color: #0E7FA8;
+  background: #E8F4FA; color: #0B6E92;
 }
 section[data-testid="stSidebar"] [data-testid="stVerticalBlock"] { gap: 0; }
 /* Streamlit centres a button's label in an inner element, so aligning

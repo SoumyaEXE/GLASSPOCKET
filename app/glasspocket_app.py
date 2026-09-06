@@ -84,9 +84,25 @@ TABS = [
 ]
 
 def _sidebar() -> int:
-    """The left rail: identity, the nine moves, and live state.
+    """The left rail: identity, the nine moves, one status line.
 
     Returns the index of the selected move.
+
+    WHAT IS NOT HERE, AND WHY
+      The rail used to carry a step number on every item, a caption for
+      the section being read, three state chips and a paragraph of
+      disclosure. All of it was true and none of it was navigation.
+
+      The numbers were ordinals rather than identifiers, so they invited
+      a reader to hunt for a meaning they did not carry. The caption
+      restated the heading the reader was about to see anyway. The
+      disclosure paragraph was a duplicate: ``C.disclosure_banner()``
+      renders the same sentence at the top of every tab, which is where
+      Section 11 requires it and where a reader is actually looking.
+
+      What survives is one status line, because whether the numbers on
+      screen came from the warehouse or from the local preview store is
+      the one fact a viewer cannot infer from anything else on the page.
     """
     with st.sidebar:
         st.markdown(
@@ -97,15 +113,12 @@ def _sidebar() -> int:
             unsafe_allow_html=True,
         )
 
-        st.markdown('<div class="gp-rail-eyebrow">the argument</div>',
-                    unsafe_allow_html=True)
-
         # One button per move. The active one is rendered primary, which
         # is the only state Streamlit gives a button, and it is enough.
         chosen = st.session_state.setdefault("gp_nav", 0)
         for index, (number, name, _move, _mod) in enumerate(TABS):
             if st.button(
-                f"{number}   {name}",
+                name,
                 key=f"gp_nav_{number}",
                 use_container_width=True,
                 type="primary" if index == chosen else "secondary",
@@ -114,30 +127,13 @@ def _sidebar() -> int:
                 chosen = index
                 st.rerun()
 
-        number, name, move, _mod = TABS[chosen]
+        live = not data.is_preview()
         st.markdown(
-            f'<div class="gp-rail-move">{move}</div>', unsafe_allow_html=True
-        )
-
-        st.markdown('<div class="gp-rail-eyebrow">state</div>',
-                    unsafe_allow_html=True)
-
-        backend = "live warehouse" if not data.is_preview() else "local preview"
-        tone = "verified" if not data.is_preview() else "seeded"
-        st.markdown(
-            '<div class="gp-rail-state">'
-            + C.chip(backend, tone)
-            + C.chip("solana devnet", "chain")
-            + C.chip("seeded data is labelled", "seeded")
-            + "</div>",
-            unsafe_allow_html=True,
-        )
-
-        st.markdown(
-            '<div class="gp-rail-foot">'
-            "Real organisation data from public filings. Impersonators and "
-            "beneficiary records are seeded and labelled, and every one of "
-            "them says so on screen. The Brief sets out which is which."
+            '<div class="gp-rail-status">'
+            f'<span class="gp-dot gp-dot-{"live" if live else "preview"}"></span>'
+            f'<span>{"live warehouse" if live else "local preview"}</span>'
+            '<span class="gp-rail-sep">/</span>'
+            "<span>solana devnet</span>"
             "</div>",
             unsafe_allow_html=True,
         )
@@ -147,7 +143,7 @@ def _sidebar() -> int:
 
 def main() -> None:
     chosen = _sidebar()
-    number, name, _move, module = TABS[chosen]
+    _number, name, _move, module = TABS[chosen]
 
     # The disclosure banner is required on every tab, not only the ones
     # that happen to mention synthetic data. Section 11.
@@ -160,7 +156,7 @@ def main() -> None:
         # must also not fail silently: the message names the tab and the
         # error so it is fixable rather than mysterious.
         st.error(
-            f"**{number} {name}** could not render.\n\n"
+            f"**{name}** could not render.\n\n"
             f"`{type(exc).__name__}: {exc}`\n\n"
             "Every other section is unaffected. If this says a column is "
             "missing, the query and the tab disagree about a name; "
