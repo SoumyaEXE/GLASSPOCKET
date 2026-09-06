@@ -311,9 +311,15 @@ def render() -> None:
 
     ranked_all = data.run("Q_CONFIDENCE_RANK", (None, None, None, None, 0.0))
     if ranked_all.empty:
+        # This used to read "run the disbursement and mint stages first",
+        # which sent a reader to rebuild a pipeline that had already run.
+        # The only way to get here now is a query fault, so say that
+        # instead of guessing at a cause.
         st.warning(
-            "No organisations have both delivery and receipt statistics "
-            "yet. Run the disbursement and mint stages first."
+            "The confidence ranking returned nothing, which should not "
+            "happen while SERVING.V_CONFIDENCE_RANK holds rows with "
+            "disbursements. Run `python tools/verify_queries.py` to see "
+            "what the warehouse actually returns for Q_CONFIDENCE_RANK."
         )
         return
 

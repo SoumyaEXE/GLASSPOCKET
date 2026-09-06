@@ -35,10 +35,13 @@ THE RECONCILIATION SECTION IS THE ARGUMENT, MEASURED.
     total is therefore a row somebody has overwritten by hand, and the
     warehouse can list those rows without anybody having kept a log.
 
-    That is not hypothetical. A demo click during development left
-    ORG_982257031, a seeded imitation, reading 43 and "verified" against
-    components summing to 62.5, and it sat in the shipped corpus until
-    acceptance check DAT-02 caught it in exactly this way.
+    That is not hypothetical, and it has happened twice. Demo clicks
+    during development left two seeded imitations carrying round numbers
+    their own components did not support: ORG_982257031 read 63.0 against
+    components summing to 62.5174, and ORG_916139786 read 80.0 against
+    76.4212. Both survived into the deployed warehouse and both were
+    named by exactly this comparison, with no audit table involved, on a
+    check that takes one query.
 
 TWO ALIGNMENT BUGS FIXED IN components.py AND theme.py RATHER THAN HERE.
 
@@ -366,8 +369,13 @@ def _then_and_now(shown_score, shown_verdict, original_score,
 
 
 def _history(org_id: str, edits, row) -> None:
-    C.section("The same row, read at six earlier moments")
     history = data.value_history(org_id, OFFSETS)
+    # Offsets that fall outside retention come back empty and are dropped,
+    # so the heading counts what was actually read rather than what was
+    # asked for. Saying "six" over a four-point chart reads as a bug in
+    # the chart when it is a fact about the window.
+    C.section(f"The same row, read at {len(history) or len(OFFSETS)} "
+              "earlier moments")
 
     with C.panel():
         C.panel_head("Value history", "marts.org_risk at(offset)")
@@ -390,10 +398,13 @@ def _history(org_id: str, edits, row) -> None:
                 ("yes" if moved else "no", "value changed"),
             ], flag="value changed" if moved else None)
             C.source_note(
-                "Six queries, no extra storage: this is Snowflake's own "
-                "retention rather than an audit table we maintain. A flat "
-                "line means the row has not been touched, which is the "
-                "answer rather than a missing chart."
+                f"{len(history)} queries against Snowflake's own retention, "
+                "no extra storage and no audit table of ours. Offsets "
+                "older than the retention window return nothing and are "
+                "dropped, which is why this can read fewer than the "
+                f"{len(OFFSETS)} it asks for. A flat line means the row "
+                "has not been touched, which is the answer rather than a "
+                "missing chart."
             )
 
     with C.panel():
@@ -504,11 +515,12 @@ def _reconciliation() -> None:
                 "wrong",
             )
         C.source_note(
-            "Acceptance check DAT-02 runs exactly this comparison and "
-            "fails the build when it finds a row. It has caught a real "
-            "one: a demo click during development left a seeded imitation "
-            "reading 43 and verified against components summing to 62.5, "
-            "and it sat in the shipped corpus until the check found it."
+            "This comparison is an acceptance check, and it fails the "
+            "build when it finds a row. It has caught two real ones: demo "
+            "clicks left ORG_982257031 reading 63.0 against components "
+            "summing to 62.5174, and ORG_916139786 reading 80.0 against "
+            "76.4212. Both were in the deployed warehouse, neither was "
+            "logged anywhere, and one query named them both."
         )
 
 

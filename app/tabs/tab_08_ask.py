@@ -263,8 +263,10 @@ def render() -> None:
         )
         for label, key in (("tables", "tables"), ("dimensions", "dimensions"),
                            ("metrics", "metrics")):
-            with st.expander(f"{label} ({len(MODEL[key])})",
-                             expanded=(key == "metrics")):
+            # All three open. The model is the substance of this tab, and
+            # two thirds of it sitting behind a collapsed row made the
+            # page read as thin when it is not.
+            with st.expander(f"{label} ({len(MODEL[key])})", expanded=True):
                 C.table(
                     [("name", "gp-td-lead"), ("definition", ""),
                      ("also called", "")],

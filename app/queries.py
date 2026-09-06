@@ -1819,9 +1819,16 @@ Q_CONFIDENCE_RANK = Query(
                disbursements, confidence
         FROM SERVING.V_CONFIDENCE_RANK
         WHERE disbursements > 0
-          AND (? IS NULL OR cause = ?)
-          AND (? IS NULL OR state = ?)
-          AND receipt_coverage >= ?
+          -- The casts are load-bearing. Binding an untyped NULL leaves
+          -- Snowflake unable to infer a type, so `? IS NULL` evaluates to
+          -- NULL rather than TRUE, the whole conjunction is NULL, and
+          -- every row is filtered out. No error is raised: the tab simply
+          -- renders its empty state over a corpus that is not empty. The
+          -- preview statement below has always carried these casts, which
+          -- is why the bug only ever appeared against the warehouse.
+          AND (CAST(? AS VARCHAR) IS NULL OR cause = CAST(? AS VARCHAR))
+          AND (CAST(? AS VARCHAR) IS NULL OR state = CAST(? AS VARCHAR))
+          AND receipt_coverage >= CAST(? AS FLOAT)
         ORDER BY confidence DESC
         LIMIT 400
     """,
