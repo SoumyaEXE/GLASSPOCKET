@@ -15,7 +15,9 @@ no hype vocabulary, no em dashes.
 - [ ] Warehouse resumed and warm, so the first click does not wait on a cold start.
 - [ ] Second browser window already open on Solana Explorer, devnet selected.
 - [ ] `sql/99_acceptance_checks.sql` run. Gate reads BUILD ACCEPTED.
-- [ ] Privacy budget reset, so The Wall opens at full.
+- [ ] The Wall opened once already, so the first differential privacy query
+      has warmed the privacy engine. It is slower than an ordinary aggregate
+      because it is doing real work, and a cold one on camera looks broken.
 - [ ] Tab 01 sampled onto a pair with a wide evasion gap. Do not reveal it yet.
 - [ ] Nothing on screen shows a credential, a key path, or a terminal with `.env` open.
 
@@ -67,17 +69,25 @@ Rotate the map once. Point at a red spike.
 ## 1:25 to 2:05 — Tab 05, The Wall
 
 **The centrepiece. Give it the time.** Narrow the filters live, one at a time,
-and let the viewer watch the two columns separate and the budget drain.
+and let the viewer watch the three cards diverge.
 
 > Everything so far has been this system finding things. Now watch it refuse.
 >
-> Broad question, and the two answers are almost identical. Narrow it. Narrow
-> it again. Cohort of one, and the released answer is noise and the budget is
-> spent.
+> One question, three objects holding identical facts. Broad, and all three
+> agree. Narrow it. Narrow it again. Four people, and the middle card refuses
+> outright while the right-hand card hands back a number that is pure noise
+> and never mentions it.
+>
+> Both are protecting the same four people. Only one of them tells you so.
 >
 > Every accountability project has the same unsolved problem. To prove aid
 > reached people you have to publish data about those people. This is the part
 > where the tool protects them from me, from you, and from itself.
+
+If there is time, scroll to the differencing sweep: two questions the floor
+answers happily, subtracted, and twelve people fall out. Then the same pair
+through the budget, where thirty runs landed anywhere between minus 27 and
+plus 51.
 
 ## 2:05 to 2:30 — Tab 06, The Receipt
 
@@ -114,8 +124,13 @@ End there. Do not add a summary.
   and neither should the narration. "Needs a second look" is the ceiling.
 - Never imply an individual delivery event is real. The aggregate is calibrated;
   the events are modelled.
-- Never say "anonymised" about the privacy layer. Differential privacy is not
+- Never say "anonymised" about either policy. Differential privacy is not
   anonymisation and conflating them is the error this tab exists to correct.
+- Never call the cohort floor differential privacy. They are two policies on
+  two objects, and the whole tab is the difference between them.
+- Do not claim the budget stops the differencing attack outright. It breaks a
+  single attempt; the limit is set above the cost of grinding through it, and
+  the tab says so.
 - Never claim a receipt proves delivery. It proves a claim was recorded.
 
 ## If something breaks on camera
