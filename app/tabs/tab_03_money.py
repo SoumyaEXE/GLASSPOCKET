@@ -212,13 +212,44 @@ def _flow_deck(flows):
     its own; the colour at the far end is the finding, and it comes from
     the footprint test in sql/08_geospatial_h3.sql rather than from the
     length of the line.
+
+    THE ANTIMERIDIAN, AND WHY THIS IS FIXED IN THE DATA
+      A US filing address near -95 degrees and a delivery in Port Vila at
+      +168 are 263 degrees apart going east and 97 going west. Given the
+      raw pair, deck.gl draws the 263, so the arc sweeps backwards across
+      the entire map and lands in a repeated copy of the world. That is
+      the smear above Oceania, and it is geometry rather than a rendering
+      bug: both paths are valid, and nothing in the coordinates says
+      which one was meant.
+
+      deck.gl exposes props for this, but their names and availability
+      have moved between versions, and inside Snowflake the version is
+      not ours to pick. An unknown prop is dropped silently, so a fix
+      that depends on one can stop working with no error to catch. The
+      same reasoning as the navigation rail in glasspocket_app.py.
+
+      So the destination longitude is unwrapped here instead, into the
+      continuous frame nearest its origin. A target at +168 against an
+      origin at -95 becomes -192, which deck.gl renders in the adjacent
+      world copy: the arc takes the short way, crosses the seam once, and
+      the endpoint sits exactly where the eye expects it. Latitude is
+      untouched, and no row is moved on the ground.
     """
     import pydeck as pdk
 
     r, g, b = _verdict_rgb(flows)
     top = max(float(flows["amount_usd"].max() or 1.0), 1.0)
+
+    origin_lon = flows["origin_lon"].astype(float)
+    dest_lon = flows["dest_lon"].astype(float)
+    # Shift the target by whole turns until it is within half a turn of
+    # its origin. round() gives the nearest copy, so a pair already close
+    # together shifts by zero and is left exactly as it was.
+    dest_lon_unwrapped = dest_lon - 360.0 * ((dest_lon - origin_lon) / 360.0).round()
+
     rows = flows[["org_name", "district", "origin_city", "origin_state",
-                  "origin_lat", "origin_lon", "dest_lat", "dest_lon"]].assign(
+                  "origin_lat", "origin_lon", "dest_lat"]].assign(
+        dest_lon=dest_lon_unwrapped,
         r=r, g=g, b=b,
         width=(0.4 + 1.5 * (flows["amount_usd"].fillna(0) / top) ** 0.5),
         usd_label=flows["amount_usd"].fillna(0).map(lambda v: f"${v:,.0f}"),
@@ -258,9 +289,13 @@ def _flow_deck(flows):
 def _points_deck(flows):
     """C03-1c. The raw delivery events, one dot each.
 
-    The grid is the Snowflake story and this is the density. 8,545 points
-    over sixteen districts show how thick the corridors really are, which
-    a sub-pixel hexagon cannot.
+    The grid is the Snowflake story and this is the density. 9,716 points
+    over forty districts show how thick the corridors really are, which a
+    sub-pixel hexagon cannot.
+
+    Longitudes are the true ones here. The unwrapping in _flow_deck exists
+    only to pair a target with an origin; a lone point has nothing to be
+    near, and shifting it would move it off its own country.
     """
     import pydeck as pdk
 
