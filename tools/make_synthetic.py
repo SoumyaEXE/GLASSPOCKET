@@ -731,7 +731,20 @@ def threshold_sweep(orgs: pd.DataFrame, vectors: np.ndarray,
 # 4. Disbursements, deliveries and beneficiaries
 # ===========================================================================
 
+# Real places where humanitarian aid is actually coordinated, across six
+# continents. The spread is not decoration: the geometry test in sql/08
+# asks whether a delivery landed inside the footprint an organisation
+# declared, and that question is only interesting when footprints are far
+# enough apart for the answer to vary. Sixteen districts inside one band
+# of latitude made every stray delivery look alike.
+#
+# NOTE ON ORDER. Appending rather than reordering is deliberate. Events
+# are assigned by drawing an index from this list, so inserting a row in
+# the middle would move every existing delivery to a different district
+# on the next regeneration, and the 285 compressed-NFT receipts already
+# on devnet reference those events by id. Add to the end. Never reorder.
 DISTRICTS = [
+    # Middle East and North Africa
     ("Rafah", "PS", 31.2870, 34.2500), ("Khan Yunis", "PS", 31.3400, 34.3060),
     ("Deir al-Balah", "PS", 31.4180, 34.3510), ("Gaza North", "PS", 31.5490, 34.5060),
     ("Wad Madani", "SD", 14.4010, 33.5190), ("El Obeid", "SD", 13.1840, 30.2170),
@@ -740,6 +753,25 @@ DISTRICTS = [
     ("Chitrakoot", "IN", 25.2000, 80.9000), ("Balrampur", "IN", 27.4300, 82.1800),
     ("Cox's Bazar", "BD", 21.4270, 92.0050), ("Kutupalong", "BD", 21.2130, 92.1620),
     ("Maradi", "NE", 13.5000, 7.1000), ("Diffa", "NE", 13.3150, 12.6110),
+    # Sub-Saharan Africa
+    ("Goma", "CD", -1.6790, 29.2280), ("Juba", "SS", 4.8590, 31.5710),
+    ("Maiduguri", "NG", 11.8330, 13.1500), ("Dollo Ado", "ET", 4.1700, 42.0700),
+    ("Dadaab", "KE", 0.0500, 40.3100), ("Mopti", "ML", 14.4890, -4.1830),
+    ("Cabo Delgado", "MZ", -12.9740, 40.5170), ("Zinder", "NE", 13.8060, 8.9880),
+    # Western Asia
+    ("Aleppo", "SY", 36.2020, 37.1340), ("Zaatari", "JO", 32.2940, 36.3250),
+    ("Sanaa", "YE", 15.3690, 44.1910), ("Erbil", "IQ", 36.1900, 43.9930),
+    # South and South-East Asia
+    ("Kabul", "AF", 34.5550, 69.2075), ("Sittwe", "MM", 20.1450, 92.8990),
+    ("Kathmandu", "NP", 27.7170, 85.3240), ("Tacloban", "PH", 11.2440, 125.0030),
+    ("Quetta", "PK", 30.1800, 66.9750),
+    # Europe
+    ("Lviv", "UA", 49.8400, 24.0300), ("Chisinau", "MD", 47.0100, 28.8600),
+    # Latin America and the Caribbean
+    ("Port-au-Prince", "HT", 18.5940, -72.3070), ("Cucuta", "CO", 7.8940, -72.5040),
+    ("Tapachula", "MX", 14.9060, -92.2670), ("La Guajira", "VE", 11.5480, -72.0000),
+    # Oceania
+    ("Port Vila", "VU", -17.7340, 168.3220),
 ]
 
 PROGRAMMES = [
