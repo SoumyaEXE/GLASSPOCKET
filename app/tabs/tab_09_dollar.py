@@ -309,7 +309,7 @@ def render() -> None:
         "true, and acceptance check INT-05 verifies that the filter holds."
     )
 
-    ranked_all = data.run("Q_CONFIDENCE_RANK", (None, None, None, None, 0.0))
+    ranked_all = data.run("Q_CONFIDENCE_RANK")
     if ranked_all.empty:
         # This used to read "run the disbursement and mint stages first",
         # which sent a reader to rebuild a pipeline that had already run.

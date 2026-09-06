@@ -1813,24 +1813,33 @@ Q_ASK_TOTAL_MOVED = Query(
 # THE ONLY TAB WITH ZERO SYNTHETIC CONTENT.
 
 Q_CONFIDENCE_RANK = Query(
+    # NO BIND PARAMETERS, DELIBERATELY.
+    #
+    # This carried three optional filters as `(? IS NULL OR col = ?)`.
+    # Binding an untyped NULL leaves the engine unable to infer a type, so
+    # `? IS NULL` evaluates to NULL rather than TRUE, the conjunction goes
+    # NULL, and every row is filtered out. Nothing raises: the tab renders
+    # its empty state over a corpus that is not empty. Casting the binds
+    # fixed it for the raw connector and did not fix it under Snowpark,
+    # which is where the application actually runs.
+    #
+    # Chasing that across two binding layers is the wrong shape of fix.
+    # The only caller passes all-NULL and then filters the frame in pandas
+    # anyway, so the parameters were never doing work. They are gone, and
+    # with them the failure mode.
+    #
+    # The limit rose from 400 to 1000 at the same time. The view holds 516
+    # rows with disbursements, so a 400 limit was silently hiding 116
+    # organisations from a tab whose entire job is to list the ones that
+    # cleared every check.
     sql="""
         SELECT org_id, ein, name, city, state, cause, blurb,
                delivery_rate, receipt_coverage, value_moved_usd,
                disbursements, confidence
         FROM SERVING.V_CONFIDENCE_RANK
         WHERE disbursements > 0
-          -- The casts are load-bearing. Binding an untyped NULL leaves
-          -- Snowflake unable to infer a type, so `? IS NULL` evaluates to
-          -- NULL rather than TRUE, the whole conjunction is NULL, and
-          -- every row is filtered out. No error is raised: the tab simply
-          -- renders its empty state over a corpus that is not empty. The
-          -- preview statement below has always carried these casts, which
-          -- is why the bug only ever appeared against the warehouse.
-          AND (CAST(? AS VARCHAR) IS NULL OR cause = CAST(? AS VARCHAR))
-          AND (CAST(? AS VARCHAR) IS NULL OR state = CAST(? AS VARCHAR))
-          AND receipt_coverage >= CAST(? AS FLOAT)
         ORDER BY confidence DESC
-        LIMIT 400
+        LIMIT 1000
     """,
     # Mirrors SERVING.V_CONFIDENCE_RANK exactly, including which table
     # each column comes from: the activity figures live on the Dynamic
@@ -1853,27 +1862,22 @@ Q_CONFIDENCE_RANK = Query(
           AND o.is_verified
           AND o.batch_id = 'IRS_BMF_2026'
           AND a.disbursements > 0
-          AND (CAST(? AS VARCHAR) IS NULL OR o.cause = CAST(? AS VARCHAR))
-          AND (CAST(? AS VARCHAR) IS NULL OR o.state = CAST(? AS VARCHAR))
-          AND COALESCE(r.receipt_coverage, 0) >= CAST(? AS DOUBLE)
         ORDER BY confidence DESC
-        LIMIT 400
+        LIMIT 1000
     """,
     note=(
         "Hard filter on is_synthetic, verified by acceptance check INT-05.\n\n"
         "disbursements > 0 is the second filter and it was missing from the "
         "warehouse statement. SERVING.V_CONFIDENCE_RANK LEFT JOINs activity "
         "onto every verified organisation in the filing list, so without it "
-        "the warehouse returned 44,101 rows against the preview's 820: "
-        "43,000 of them organisations that have moved no money at all, "
-        "scored zero on both axes, and sat in a heap on the origin of the "
-        "chart. The preview had the filter implicitly, through an inner "
-        "join, which is how the two backends came to disagree by a factor "
-        "of fifty about how many organisations this tab is about. An "
-        "organisation with no disbursements has not cleared every check; it "
-        "has not taken any."
+        "the warehouse returned 44,101 rows against the preview's 820: an "
+        "organisation that has never moved money is not a confident one, it "
+        "is an absent one.\n\n"
+        "Cause, region and coverage are filtered by the tab in pandas, not "
+        "here. See the comment above the statement."
     ),
 )
+
 
 Q_CONFIDENCE_COUNT = Query(
     sql=("SELECT COUNT(*) AS cleared FROM SERVING.V_CONFIDENCE_RANK "
